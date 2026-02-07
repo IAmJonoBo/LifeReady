@@ -1,6 +1,7 @@
 # LifeReady SA
 
-LifeReady SA is a South Africa-first "servant software" platform for preparing and executing incapacity and death-readiness workflows using:
+LifeReady SA is a South Africa-first "servant software" platform for preparing and executing
+incapacity and death-readiness workflows using:
 
 - defensible documentation packs
 - role-scoped access (RBAC)
@@ -12,7 +13,9 @@ This repository is contract-first:
 - Rust Axum stubs are generated from contracts
 - CI fails on generated drift
 
-> Important: LifeReady SA is not a law firm or medical provider. It organizes documents, instructions, and evidence packs. It must never claim legal appointment or medical verification.
+> Important: LifeReady SA is not a law firm or medical provider. It organizes documents,
+> instructions, and evidence packs. It must never claim legal appointment or medical
+> verification.
 
 ---
 
@@ -171,8 +174,8 @@ make flutter-check
 
 ## Make targets
 
-- make validate-openapi / make validate-openapi-<service>
-- make generate-axum / make generate-axum-<service>
+- `make validate-openapi` / `make validate-openapi-<service>`
+- `make generate-axum` / `make generate-axum-<service>`
 - make generate-flutter-tokens
 - make flutter-check
 - make dev-up / make dev-down

@@ -50,7 +50,7 @@ ThemeData themeFromTokens(Tokens t) {
       ),
     ),
     dividerColor: t.outline,
-    cardTheme: CardTheme(
+    cardTheme: CardThemeData(
       color: t.surfaceAlt,
       elevation: 0,
       shape: RoundedRectangleBorder(

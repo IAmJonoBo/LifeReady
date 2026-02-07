@@ -1,7 +1,9 @@
-use axum::body::Body;
-use http::{Request, StatusCode};
+use axum::{
+    body::Body,
+    http::{Request, StatusCode},
+};
 use http_body_util::BodyExt;
-use tower::ServiceExt;
+use tower::util::ServiceExt;
 
 #[tokio::test]
 async fn append_event_returns_hashes() {

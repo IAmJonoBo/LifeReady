@@ -1,2 +1,9 @@
 LICENSE
 NOTICE
+**/node_modules/**
+.trunk/**
+.github/**
+docs/PRD.md
+docs/copilot_scaffold_prompt.md
+CODE_OF_CONDUCT.md
+SECURITY.md

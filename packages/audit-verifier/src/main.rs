@@ -63,14 +63,14 @@ fn main() {
         last_hash = prev_hash.clone();
     }
 
-    if let Some(expected) = args.head_hash {
-        if expected != last_hash {
-            eprintln!(
-                "Head hash mismatch: expected {}, got {}",
-                expected, last_hash
-            );
-            std::process::exit(1);
-        }
+    if let Some(expected) = args.head_hash
+        && expected != last_hash
+    {
+        eprintln!(
+            "Head hash mismatch: expected {}, got {}",
+            expected, last_hash
+        );
+        std::process::exit(1);
     }
 
     println!("Audit chain OK. Head hash: {}", last_hash);

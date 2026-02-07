@@ -143,8 +143,9 @@ async fn append_audit_event(
 
 async fn export_audit(
     State(state): State<AppState>,
-    _query: axum::extract::Query<AuditExportQuery>,
+    query: axum::extract::Query<AuditExportQuery>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
+    let _ = query.case_id.as_deref();
     let events = state.events.lock().await;
     let head_hash = events
         .last()

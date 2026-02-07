@@ -1,14 +1,15 @@
-use axum::body::Body;
-use http::{Request, StatusCode};
-use http_body_util::Empty;
-use tower::ServiceExt;
+use axum::{
+    body::Body,
+    http::{Request, StatusCode},
+};
+use tower::util::ServiceExt;
 
 #[tokio::test]
 async fn healthz_exists() {
     let app = vault_service::router();
     let req = Request::builder()
         .uri("/healthz")
-        .body(Empty::<Body>::new())
+        .body(Body::empty())
         .unwrap();
 
     let res = axum::Router::into_service(app).oneshot(req).await.unwrap();

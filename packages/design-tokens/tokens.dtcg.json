@@ -1,59 +1,130 @@
 {
-  "$schema": "https://design-tokens.github.io/community-group/format/draft/",
+  "$schema": "./schemas/2025.10/format.json",
   "lifeready": {
-    "meta": {
-      "brand": { "$type": "string", "$value": "LifeReady SA" },
-      "version": { "$type": "string", "$value": "0.1.0" }
+    "$extensions": {
+      "meta": {
+        "brand": "LifeReady SA",
+        "version": "0.1.0"
+      }
     },
     "color": {
-      "surface": { "$type": "color", "$value": "#0B0C0F" },
-      "surfaceAlt": { "$type": "color", "$value": "#12141A" },
-      "text": { "$type": "color", "$value": "#F5F7FF" },
-      "textMuted": { "$type": "color", "$value": "#B8BECC" },
-      "primary": { "$type": "color", "$value": "#7C5CFF" },
-      "danger": { "$type": "color", "$value": "#FF4D4D" },
-      "success": { "$type": "color", "$value": "#3DE07E" },
-      "warning": { "$type": "color", "$value": "#FFB020" },
-      "outline": { "$type": "color", "$value": "#2A2F3A" }
+      "surface": {
+        "$type": "color",
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [0.043137, 0.047059, 0.058824],
+          "hex": "#0B0C0F"
+        }
+      },
+      "surfaceAlt": {
+        "$type": "color",
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [0.070588, 0.078431, 0.101961],
+          "hex": "#12141A"
+        }
+      },
+      "text": {
+        "$type": "color",
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [0.960784, 0.968627, 1],
+          "hex": "#F5F7FF"
+        }
+      },
+      "textMuted": {
+        "$type": "color",
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [0.721569, 0.745098, 0.8],
+          "hex": "#B8BECC"
+        }
+      },
+      "primary": {
+        "$type": "color",
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [0.486275, 0.360784, 1],
+          "hex": "#7C5CFF"
+        }
+      },
+      "danger": {
+        "$type": "color",
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [1, 0.301961, 0.301961],
+          "hex": "#FF4D4D"
+        }
+      },
+      "success": {
+        "$type": "color",
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [0.239216, 0.878431, 0.494118],
+          "hex": "#3DE07E"
+        }
+      },
+      "warning": {
+        "$type": "color",
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [1, 0.690196, 0.12549],
+          "hex": "#FFB020"
+        }
+      },
+      "outline": {
+        "$type": "color",
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [0.164706, 0.184314, 0.227451],
+          "hex": "#2A2F3A"
+        }
+      }
     },
     "radius": {
-      "xs": { "$type": "dimension", "$value": "6" },
-      "sm": { "$type": "dimension", "$value": "10" },
-      "md": { "$type": "dimension", "$value": "16" },
-      "lg": { "$type": "dimension", "$value": "24" }
+      "xs": { "$type": "dimension", "$value": { "value": 6, "unit": "px" } },
+      "sm": { "$type": "dimension", "$value": { "value": 10, "unit": "px" } },
+      "md": { "$type": "dimension", "$value": { "value": 16, "unit": "px" } },
+      "lg": { "$type": "dimension", "$value": { "value": 24, "unit": "px" } }
     },
     "space": {
-      "1": { "$type": "dimension", "$value": "4" },
-      "2": { "$type": "dimension", "$value": "8" },
-      "3": { "$type": "dimension", "$value": "12" },
-      "4": { "$type": "dimension", "$value": "16" },
-      "5": { "$type": "dimension", "$value": "24" },
-      "6": { "$type": "dimension", "$value": "32" }
+      "1": { "$type": "dimension", "$value": { "value": 4, "unit": "px" } },
+      "2": { "$type": "dimension", "$value": { "value": 8, "unit": "px" } },
+      "3": { "$type": "dimension", "$value": { "value": 12, "unit": "px" } },
+      "4": { "$type": "dimension", "$value": { "value": 16, "unit": "px" } },
+      "5": { "$type": "dimension", "$value": { "value": 24, "unit": "px" } },
+      "6": { "$type": "dimension", "$value": { "value": 32, "unit": "px" } }
     },
     "type": {
       "fontFamily": { "$type": "fontFamily", "$value": "Inter" },
       "size": {
-        "xs": { "$type": "fontSize", "$value": "12" },
-        "sm": { "$type": "fontSize", "$value": "14" },
-        "md": { "$type": "fontSize", "$value": "16" },
-        "lg": { "$type": "fontSize", "$value": "18" },
-        "xl": { "$type": "fontSize", "$value": "22" },
-        "2xl": { "$type": "fontSize", "$value": "28" }
+        "xs": { "$type": "dimension", "$value": { "value": 12, "unit": "px" } },
+        "sm": { "$type": "dimension", "$value": { "value": 14, "unit": "px" } },
+        "md": { "$type": "dimension", "$value": { "value": 16, "unit": "px" } },
+        "lg": { "$type": "dimension", "$value": { "value": 18, "unit": "px" } },
+        "xl": { "$type": "dimension", "$value": { "value": 22, "unit": "px" } },
+        "2xl": { "$type": "dimension", "$value": { "value": 28, "unit": "px" } }
       },
       "weight": {
-        "regular": { "$type": "fontWeight", "$value": "400" },
-        "medium": { "$type": "fontWeight", "$value": "500" },
-        "semibold": { "$type": "fontWeight", "$value": "600" }
+        "regular": { "$type": "fontWeight", "$value": 400 },
+        "medium": { "$type": "fontWeight", "$value": 500 },
+        "semibold": { "$type": "fontWeight", "$value": 600 }
       },
       "lineHeight": {
-        "tight": { "$type": "dimension", "$value": "1.15" },
-        "normal": { "$type": "dimension", "$value": "1.35" }
+        "tight": { "$type": "number", "$value": 1.15 },
+        "normal": { "$type": "number", "$value": 1.35 }
       }
     },
     "motion": {
       "duration": {
-        "fast": { "$type": "duration", "$value": "120" },
-        "normal": { "$type": "duration", "$value": "220" }
+        "fast": {
+          "$type": "duration",
+          "$value": { "value": 120, "unit": "ms" }
+        },
+        "normal": {
+          "$type": "duration",
+          "$value": { "value": 220, "unit": "ms" }
+        }
       },
       "curve": {
         "standard": { "$type": "cubicBezier", "$value": [0.2, 0.0, 0.0, 1.0] }

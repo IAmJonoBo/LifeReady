@@ -26,7 +26,7 @@ class LrBadge extends StatelessWidget {
     return Container(
       padding: EdgeInsets.symmetric(horizontal: t.s3, vertical: t.s2),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.2),
+        color: color.withValues(alpha: 0.2),
         borderRadius: BorderRadius.circular(t.rSm),
         border: Border.all(color: color),
       ),

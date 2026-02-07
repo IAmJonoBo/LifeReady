@@ -14,29 +14,29 @@ class GeneratedTokens {
   static const Color warning = Color(0xffffb020);
   static const Color outline = Color(0xff2a2f3a);
 
-  static const double rXs = 6;
-  static const double rSm = 10;
-  static const double rMd = 16;
-  static const double rLg = 24;
+  static const double rXs = 6.0;
+  static const double rSm = 10.0;
+  static const double rMd = 16.0;
+  static const double rLg = 24.0;
 
-  static const double s1 = 4;
-  static const double s2 = 8;
-  static const double s3 = 12;
-  static const double s4 = 16;
-  static const double s5 = 24;
-  static const double s6 = 32;
+  static const double s1 = 4.0;
+  static const double s2 = 8.0;
+  static const double s3 = 12.0;
+  static const double s4 = 16.0;
+  static const double s5 = 24.0;
+  static const double s6 = 32.0;
 
   static const String fontFamily = 'Inter';
-  static const double sizeXs = 12;
-  static const double sizeSm = 14;
-  static const double sizeMd = 16;
-  static const double sizeLg = 18;
-  static const double sizeXl = 22;
-  static const double size2xl = 28;
+  static const double sizeXs = 12.0;
+  static const double sizeSm = 14.0;
+  static const double sizeMd = 16.0;
+  static const double sizeLg = 18.0;
+  static const double sizeXl = 22.0;
+  static const double size2xl = 28.0;
 
-  static const double weightRegular = 400;
-  static const double weightMedium = 500;
-  static const double weightSemibold = 600;
+  static const double weightRegular = 400.0;
+  static const double weightMedium = 500.0;
+  static const double weightSemibold = 600.0;
 
   static const double lineHeightTight = 1.15;
   static const double lineHeightNormal = 1.35;
@@ -44,5 +44,5 @@ class GeneratedTokens {
   static const int motionFastMs = 120;
   static const int motionNormalMs = 220;
 
-  static const List<double> curveStandard = [0.2, 0.0, 0.0, 1.0];
+  static const List<double> curveStandard = [0.20, 0.00, 0.00, 1.00];
 }

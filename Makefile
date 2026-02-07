@@ -17,6 +17,7 @@ help:
 	@echo "  make generate-flutter-tokens    Regenerate Flutter tokens from DTCG JSON"
 	@echo "  make flutter-check              Run tokens + analyze + test for Flutter"
 	@echo "  make lint-docs                  Run markdownlint on docs"
+	@echo "  make upgrade-toolchain          Install/refresh repo toolchains"
 	@echo "  make dev-up                     Start local dev services"
 	@echo "  make dev-down                   Stop local dev services"
 	@echo "  make db-migrate                 Run service migrations"
@@ -55,11 +56,15 @@ generate-flutter-tokens:
 flutter-check: generate-flutter-tokens
 	@cd apps/lifeready_flutter && flutter pub get
 	@cd apps/lifeready_flutter && flutter analyze
-	@cd apps/lifeready_flutter && flutter test
+	@cd apps/lifeready_flutter && if [ -d test ]; then flutter test; else echo "No Flutter tests yet."; fi
 
 .PHONY: lint-docs
 lint-docs:
 	@$(SCRIPTS_DIR)/markdownlint.sh
+
+.PHONY: upgrade-toolchain
+upgrade-toolchain:
+	@$(SCRIPTS_DIR)/upgrade-toolchain.sh
 
 .PHONY: dev-up
 dev-up:

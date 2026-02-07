@@ -9,7 +9,7 @@ class TokenPath {
 void main() {
   final scriptDir = File.fromUri(Platform.script).parent;
   final inputPath = scriptDir.uri.resolve(
-    '../../packages/design-tokens/tokens.dtcg.json',
+    '../../../packages/design-tokens/tokens.dtcg.json',
   );
   final outputPath = scriptDir.uri.resolve(
     '../lib/design/generated_tokens.dart',
@@ -29,138 +29,202 @@ void main() {
     exit(2);
   }
 
-  String getString(TokenPath path) => _get(path, lifeready).toString();
-  double getDouble(TokenPath path) => double.parse(getString(path));
-  String getColor(TokenPath path) => getString(path).toLowerCase();
+  String getMetaString(String key) {
+    final extensions = lifeready[r'$extensions'] as Map<String, dynamic>?;
+    final meta = extensions?['meta'] as Map<String, dynamic>?;
+    final value = meta?[key];
+    if (value == null) {
+      throw StateError('Missing metadata: $key');
+    }
+    return value.toString();
+  }
+
+  dynamic getValue(TokenPath path) => _get(path, lifeready);
+
+  String getStringValue(TokenPath path) => getValue(path).toString();
+
+  double getNumberValue(TokenPath path) {
+    final value = getValue(path);
+    if (value is num) {
+      return value.toDouble();
+    }
+    return double.parse(value.toString());
+  }
+
+  double getDimensionValue(TokenPath path) {
+    final value = getValue(path);
+    if (value is Map<String, dynamic>) {
+      final unit = value['unit']?.toString();
+      if (unit != 'px' && unit != 'rem') {
+        throw StateError('Unsupported dimension unit: $unit');
+      }
+      final raw = value['value'];
+      if (raw is num) {
+        return raw.toDouble();
+      }
+      return double.parse(raw.toString());
+    }
+    throw StateError('Invalid dimension value: $value');
+  }
+
+  int getDurationMs(TokenPath path) {
+    final value = getValue(path);
+    if (value is Map<String, dynamic>) {
+      final unit = value['unit']?.toString();
+      final raw = value['value'];
+      final numeric = raw is num
+          ? raw.toDouble()
+          : double.parse(raw.toString());
+      if (unit == 'ms') {
+        return numeric.round();
+      }
+      if (unit == 's') {
+        return (numeric * 1000).round();
+      }
+      throw StateError('Unsupported duration unit: $unit');
+    }
+    throw StateError('Invalid duration value: $value');
+  }
+
+  String getColorHex(TokenPath path) {
+    final value = getValue(path);
+    if (value is Map<String, dynamic>) {
+      final hex = value['hex'];
+      if (hex is String) {
+        return hex.toLowerCase();
+      }
+    }
+    throw StateError(
+      'Missing hex value for color token at ${path.segments.join('/')}',
+    );
+  }
 
   final buffer = StringBuffer();
   buffer.writeln("import 'package:flutter/material.dart';");
   buffer.writeln();
   buffer.writeln('class GeneratedTokens {');
+  buffer.writeln("  static const String brand = '${getMetaString('brand')}';");
   buffer.writeln(
-    "  static const String brand = '${getString(const TokenPath(['meta', 'brand', r'\$value']))}';",
-  );
-  buffer.writeln(
-    "  static const String version = '${getString(const TokenPath(['meta', 'version', r'\$value']))}';",
+    "  static const String version = '${getMetaString('version')}';",
   );
   buffer.writeln();
 
   buffer.writeln(
-    '  static const Color surface = Color(0xff${_hex(getColor(const TokenPath(['color', 'surface', r'\$value'])))});',
+    '  static const Color surface = Color(0xff${_hex(getColorHex(const TokenPath(['color', 'surface', r'$value'])))});',
   );
   buffer.writeln(
-    '  static const Color surfaceAlt = Color(0xff${_hex(getColor(const TokenPath(['color', 'surfaceAlt', r'\$value'])))});',
+    '  static const Color surfaceAlt = Color(0xff${_hex(getColorHex(const TokenPath(['color', 'surfaceAlt', r'$value'])))});',
   );
   buffer.writeln(
-    '  static const Color text = Color(0xff${_hex(getColor(const TokenPath(['color', 'text', r'\$value'])))});',
+    '  static const Color text = Color(0xff${_hex(getColorHex(const TokenPath(['color', 'text', r'$value'])))});',
   );
   buffer.writeln(
-    '  static const Color textMuted = Color(0xff${_hex(getColor(const TokenPath(['color', 'textMuted', r'\$value'])))});',
+    '  static const Color textMuted = Color(0xff${_hex(getColorHex(const TokenPath(['color', 'textMuted', r'$value'])))});',
   );
   buffer.writeln(
-    '  static const Color primary = Color(0xff${_hex(getColor(const TokenPath(['color', 'primary', r'\$value'])))});',
+    '  static const Color primary = Color(0xff${_hex(getColorHex(const TokenPath(['color', 'primary', r'$value'])))});',
   );
   buffer.writeln(
-    '  static const Color danger = Color(0xff${_hex(getColor(const TokenPath(['color', 'danger', r'\$value'])))});',
+    '  static const Color danger = Color(0xff${_hex(getColorHex(const TokenPath(['color', 'danger', r'$value'])))});',
   );
   buffer.writeln(
-    '  static const Color success = Color(0xff${_hex(getColor(const TokenPath(['color', 'success', r'\$value'])))});',
+    '  static const Color success = Color(0xff${_hex(getColorHex(const TokenPath(['color', 'success', r'$value'])))});',
   );
   buffer.writeln(
-    '  static const Color warning = Color(0xff${_hex(getColor(const TokenPath(['color', 'warning', r'\$value'])))});',
+    '  static const Color warning = Color(0xff${_hex(getColorHex(const TokenPath(['color', 'warning', r'$value'])))});',
   );
   buffer.writeln(
-    '  static const Color outline = Color(0xff${_hex(getColor(const TokenPath(['color', 'outline', r'\$value'])))});',
-  );
-  buffer.writeln();
-
-  buffer.writeln(
-    '  static const double rXs = ${getDouble(const TokenPath(['radius', 'xs', r'\$value']))};',
-  );
-  buffer.writeln(
-    '  static const double rSm = ${getDouble(const TokenPath(['radius', 'sm', r'\$value']))};',
-  );
-  buffer.writeln(
-    '  static const double rMd = ${getDouble(const TokenPath(['radius', 'md', r'\$value']))};',
-  );
-  buffer.writeln(
-    '  static const double rLg = ${getDouble(const TokenPath(['radius', 'lg', r'\$value']))};',
+    '  static const Color outline = Color(0xff${_hex(getColorHex(const TokenPath(['color', 'outline', r'$value'])))});',
   );
   buffer.writeln();
 
   buffer.writeln(
-    '  static const double s1 = ${getDouble(const TokenPath(['space', '1', r'\$value']))};',
+    '  static const double rXs = ${getDimensionValue(const TokenPath(['radius', 'xs', r'$value']))};',
   );
   buffer.writeln(
-    '  static const double s2 = ${getDouble(const TokenPath(['space', '2', r'\$value']))};',
+    '  static const double rSm = ${getDimensionValue(const TokenPath(['radius', 'sm', r'$value']))};',
   );
   buffer.writeln(
-    '  static const double s3 = ${getDouble(const TokenPath(['space', '3', r'\$value']))};',
+    '  static const double rMd = ${getDimensionValue(const TokenPath(['radius', 'md', r'$value']))};',
   );
   buffer.writeln(
-    '  static const double s4 = ${getDouble(const TokenPath(['space', '4', r'\$value']))};',
-  );
-  buffer.writeln(
-    '  static const double s5 = ${getDouble(const TokenPath(['space', '5', r'\$value']))};',
-  );
-  buffer.writeln(
-    '  static const double s6 = ${getDouble(const TokenPath(['space', '6', r'\$value']))};',
+    '  static const double rLg = ${getDimensionValue(const TokenPath(['radius', 'lg', r'$value']))};',
   );
   buffer.writeln();
 
   buffer.writeln(
-    "  static const String fontFamily = '${getString(const TokenPath(['type', 'fontFamily', r'\$value']))}';",
+    '  static const double s1 = ${getDimensionValue(const TokenPath(['space', '1', r'$value']))};',
   );
   buffer.writeln(
-    '  static const double sizeXs = ${getDouble(const TokenPath(['type', 'size', 'xs', r'\$value']))};',
+    '  static const double s2 = ${getDimensionValue(const TokenPath(['space', '2', r'$value']))};',
   );
   buffer.writeln(
-    '  static const double sizeSm = ${getDouble(const TokenPath(['type', 'size', 'sm', r'\$value']))};',
+    '  static const double s3 = ${getDimensionValue(const TokenPath(['space', '3', r'$value']))};',
   );
   buffer.writeln(
-    '  static const double sizeMd = ${getDouble(const TokenPath(['type', 'size', 'md', r'\$value']))};',
+    '  static const double s4 = ${getDimensionValue(const TokenPath(['space', '4', r'$value']))};',
   );
   buffer.writeln(
-    '  static const double sizeLg = ${getDouble(const TokenPath(['type', 'size', 'lg', r'\$value']))};',
+    '  static const double s5 = ${getDimensionValue(const TokenPath(['space', '5', r'$value']))};',
   );
   buffer.writeln(
-    '  static const double sizeXl = ${getDouble(const TokenPath(['type', 'size', 'xl', r'\$value']))};',
-  );
-  buffer.writeln(
-    '  static const double size2xl = ${getDouble(const TokenPath(['type', 'size', '2xl', r'\$value']))};',
+    '  static const double s6 = ${getDimensionValue(const TokenPath(['space', '6', r'$value']))};',
   );
   buffer.writeln();
 
   buffer.writeln(
-    '  static const double weightRegular = ${getDouble(const TokenPath(['type', 'weight', 'regular', r'\$value']))};',
+    "  static const String fontFamily = '${getStringValue(const TokenPath(['type', 'fontFamily', r'$value']))}';",
   );
   buffer.writeln(
-    '  static const double weightMedium = ${getDouble(const TokenPath(['type', 'weight', 'medium', r'\$value']))};',
+    '  static const double sizeXs = ${getDimensionValue(const TokenPath(['type', 'size', 'xs', r'$value']))};',
   );
   buffer.writeln(
-    '  static const double weightSemibold = ${getDouble(const TokenPath(['type', 'weight', 'semibold', r'\$value']))};',
+    '  static const double sizeSm = ${getDimensionValue(const TokenPath(['type', 'size', 'sm', r'$value']))};',
+  );
+  buffer.writeln(
+    '  static const double sizeMd = ${getDimensionValue(const TokenPath(['type', 'size', 'md', r'$value']))};',
+  );
+  buffer.writeln(
+    '  static const double sizeLg = ${getDimensionValue(const TokenPath(['type', 'size', 'lg', r'$value']))};',
+  );
+  buffer.writeln(
+    '  static const double sizeXl = ${getDimensionValue(const TokenPath(['type', 'size', 'xl', r'$value']))};',
+  );
+  buffer.writeln(
+    '  static const double size2xl = ${getDimensionValue(const TokenPath(['type', 'size', '2xl', r'$value']))};',
   );
   buffer.writeln();
 
   buffer.writeln(
-    '  static const double lineHeightTight = ${getDouble(const TokenPath(['type', 'lineHeight', 'tight', r'\$value']))};',
+    '  static const double weightRegular = ${getNumberValue(const TokenPath(['type', 'weight', 'regular', r'$value']))};',
   );
   buffer.writeln(
-    '  static const double lineHeightNormal = ${getDouble(const TokenPath(['type', 'lineHeight', 'normal', r'\$value']))};',
+    '  static const double weightMedium = ${getNumberValue(const TokenPath(['type', 'weight', 'medium', r'$value']))};',
+  );
+  buffer.writeln(
+    '  static const double weightSemibold = ${getNumberValue(const TokenPath(['type', 'weight', 'semibold', r'$value']))};',
   );
   buffer.writeln();
 
   buffer.writeln(
-    '  static const int motionFastMs = ${getDouble(const TokenPath(['motion', 'duration', 'fast', r'\$value']))}.round();',
+    '  static const double lineHeightTight = ${getNumberValue(const TokenPath(['type', 'lineHeight', 'tight', r'$value']))};',
   );
   buffer.writeln(
-    '  static const int motionNormalMs = ${getDouble(const TokenPath(['motion', 'duration', 'normal', r'\$value']))}.round();',
+    '  static const double lineHeightNormal = ${getNumberValue(const TokenPath(['type', 'lineHeight', 'normal', r'$value']))};',
+  );
+  buffer.writeln();
+
+  buffer.writeln(
+    '  static const int motionFastMs = ${getDurationMs(const TokenPath(['motion', 'duration', 'fast', r'$value']))};',
+  );
+  buffer.writeln(
+    '  static const int motionNormalMs = ${getDurationMs(const TokenPath(['motion', 'duration', 'normal', r'$value']))};',
   );
   buffer.writeln();
 
   final curve =
       _get(
-            const TokenPath(['motion', 'curve', 'standard', r'\$value']),
+            const TokenPath(['motion', 'curve', 'standard', r'$value']),
             lifeready,
           )
           as List;
