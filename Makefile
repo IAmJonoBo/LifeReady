@@ -16,6 +16,7 @@ help:
 	@echo "  make generate-axum-<service>     Generate stubs for a single service"
 	@echo "  make generate-flutter-tokens    Regenerate Flutter tokens from DTCG JSON"
 	@echo "  make flutter-check              Run tokens + analyze + test for Flutter"
+	@echo "  make lint-docs                  Run markdownlint on docs"
 	@echo "  make dev-up                     Start local dev services"
 	@echo "  make dev-down                   Stop local dev services"
 	@echo "  make db-migrate                 Run service migrations"
@@ -55,6 +56,10 @@ flutter-check: generate-flutter-tokens
 	@cd apps/lifeready_flutter && flutter pub get
 	@cd apps/lifeready_flutter && flutter analyze
 	@cd apps/lifeready_flutter && flutter test
+
+.PHONY: lint-docs
+lint-docs:
+	@$(SCRIPTS_DIR)/markdownlint.sh
 
 .PHONY: dev-up
 dev-up:

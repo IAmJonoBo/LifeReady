@@ -73,9 +73,9 @@ design-tokens/ # DTCG token source-of-truth
 audit-verifier/ # Rust CLI to verify audit chains/manifests
 
 services/
-<service>/src # handwritten service crate code
-<service>/generated # generated stubs from OpenAPI
-<service>/migrations # SQL migrations where applicable
+service/src # handwritten service crate code
+service/generated # generated stubs from OpenAPI
+service/migrations # SQL migrations where applicable
 
 scripts/
 validate-openapi.sh
@@ -96,8 +96,8 @@ openapi/ # pinned openapi-generator wrapper
 
 OpenAPI Generator is invoked via the pinned wrapper in tools/openapi. See OpenAPI Generator CLI usage and installation docs:
 
-- https://openapi-generator.tech/docs/usage/
-- https://openapi-generator.tech/docs/installation/
+- [OpenAPI Generator usage](https://openapi-generator.tech/docs/usage/)
+- [OpenAPI Generator installation](https://openapi-generator.tech/docs/installation/)
 
 ---
 
