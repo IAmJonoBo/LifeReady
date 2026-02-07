@@ -1,21 +1,21 @@
 # LifeReady SA
 
-LifeReady SA is a South Africa-first "servant software" platform for preparing and executing
-incapacity and death-readiness workflows using:
+LifeReady SA is a South Africa-first "servant software" platform for preparing and
+executing incapacity and death-readiness workflows using:
 
 - defensible documentation packs
 - role-scoped access (RBAC)
 - a tamper-evident, append-only audit trail
 
-This repository is contract-first:
+This repository is **contract-first**:
 
 - OpenAPI 3.1 contracts are the source of truth
 - Rust Axum stubs are generated from contracts
 - CI fails on generated drift
 
-> Important: LifeReady SA is not a law firm or medical provider. It organizes documents,
-> instructions, and evidence packs. It must never claim legal appointment or medical
-> verification.
+> Important: LifeReady SA is not a law firm or medical provider. It organises documents,
+> instructions, and evidence packs. It must never claim legal appointment, legal advice, or
+> medical verification.
 
 ---
 
@@ -33,10 +33,10 @@ This repository is contract-first:
   - append-only, hash-chained audit log
   - exportable audit proof bundles
 
-### Explicitly out of scope
+### Explicitly out of scope (v0.1)
 
 - live biometric/IoT triggers
-- medical optimization, triage scheduling, or treatment recommendations
+- medical optimisation, triage scheduling, or treatment recommendations
 - automatic incapacity determination
 - automatic release of high-risk secrets (seed phrases, custodial credentials)
 
@@ -47,7 +47,7 @@ This repository is contract-first:
 ### Client
 
 - Flutter (Android / iOS / Web)
-- Design tokens (DTCG JSON) -> generated Flutter tokens
+- Design tokens (DTCG JSON) → generated Flutter tokens
 
 ### Backend
 
@@ -67,26 +67,31 @@ This repository is contract-first:
 
 ## Repo layout
 
+```text
 apps/
-lifeready_flutter/
+  lifeready_flutter/
 
 packages/
-contracts/ # OpenAPI 3.1 contracts + generator config
-design-tokens/ # DTCG token source-of-truth
-audit-verifier/ # Rust CLI to verify audit chains/manifests
+  contracts/                 # OpenAPI 3.1 contracts + generator config
+  design-tokens/             # DTCG token source-of-truth
+  audit-verifier/            # Rust CLI to verify audit chains/manifests
 
 services/
-service/src # handwritten service crate code
-service/generated # generated stubs from OpenAPI
-service/migrations # SQL migrations where applicable
+  <service>/src              # handwritten service crate code
+  <service>/generated        # generated stubs from OpenAPI (committed)
+  <service>/migrations       # SQL migrations where applicable
 
 scripts/
-validate-openapi.sh
-generate-axum.sh
-generate-flutter-tokens.sh
+  validate-openapi.sh
+  generate-axum.sh
+  generate-flutter-tokens.sh
+  markdownlint.sh
+  upgrade-toolchain.sh
 
 tools/
-openapi/ # pinned openapi-generator wrapper
+  openapi/                   # pinned openapi-generator wrapper (openapitools.json)
+  markdownlint/
+```
 
 ---
 
@@ -97,78 +102,77 @@ openapi/ # pinned openapi-generator wrapper
 - Flutter stable
 - Node 20+
 
-OpenAPI Generator is invoked via the pinned wrapper in tools/openapi. See OpenAPI Generator CLI usage and installation docs:
+### Setup
 
-- [OpenAPI Generator usage](https://openapi-generator.tech/docs/usage/)
-- [OpenAPI Generator installation](https://openapi-generator.tech/docs/installation/)
+OpenAPI Generator is invoked via the pinned wrapper under `tools/openapi`.
+Validation uses `openapi-generator-cli validate --recommend`.
 
 ---
 
 ## Quick start (local dev)
 
-### 1) Install OpenAPI generator wrapper
+1. Install OpenAPI tooling (pinned)
 
-```bash
-npm install --prefix tools/openapi
-```
+   ```bash
+   npm install --prefix tools/openapi
+   ```
 
-### 2) Validate contracts + generate stubs
+2. Validate contracts + generate stubs
 
-```bash
-make validate-openapi
-make generate-axum
-```
+   ```bash
+   make validate-openapi
+   make generate-axum
+   ```
 
-### 3) Start local Postgres
+3. Start local Postgres
 
-```bash
-make dev-up
-```
+   ```bash
+   make dev-up
+   ```
 
-### 4) Configure environment
+4. Configure environment
 
-```bash
-cp .env.example .env
-```
+   ```bash
+   cp .env.example .env
+   ```
 
-### 5) Run migrations (sqlx-cli)
+5. Run migrations (sqlx-cli)
 
-Install sqlx-cli once:
+   Install once:
 
-```bash
-cargo install sqlx-cli --no-default-features --features postgres
-```
+   ```bash
+   cargo install sqlx-cli --no-default-features --features postgres
+   ```
 
-Run migrations:
+   Run migrations:
 
-```bash
-make db-migrate
-```
+   ```bash
+   make db-migrate
+   ```
 
-### 6) Run services (separate terminals)
+6. Run services (separate terminals)
 
-```bash
-cargo run -p identity_service
-cargo run -p estate_service
-cargo run -p vault_service
-cargo run -p case_service
-cargo run -p audit_service
-```
+   ```bash
+   cargo run -p identity_service
+   cargo run -p estate_service
+   cargo run -p vault_service
+   cargo run -p case_service
+   cargo run -p audit_service
+   ```
 
-Default ports (override with PORT):
+   Default ports (override with `PORT` environment variable):
+   - identity-service: 8081
+   - estate-service: 8082
+   - vault-service: 8083
+   - case-service: 8084
+   - audit-service: 8085
 
-- identity-service: 8081
-- estate-service: 8082
-- vault-service: 8083
-- case-service: 8084
-- audit-service: 8085
+7. Flutter
 
-### 7) Flutter app
-
-```bash
-make generate-flutter-tokens
-make flutter-check
-```
+   ```bash
+   make generate-flutter-tokens
+   make flutter-check
+   ```
 
 ---
 
@@ -176,15 +180,37 @@ make flutter-check
 
 - `make validate-openapi` / `make validate-openapi-<service>`
 - `make generate-axum` / `make generate-axum-<service>`
-- make generate-flutter-tokens
-- make flutter-check
-- make dev-up / make dev-down
-- make db-migrate
+- `make generate-flutter-tokens`
+- `make flutter-check`
+- `make dev-up` / `make dev-down`
+- `make db-migrate`
+- `make lint-docs`
+- `make upgrade-toolchain`
+- `make clean-generated`
 
 ---
 
-## Drift prevention
+## Drift prevention (non-negotiable)
 
-- OpenAPI generator is pinned via tools/openapi/openapitools.json and invoked through make scripts.
-- CI validates OpenAPI, regenerates stubs, and fails on git diff --exit-code.
-- Flutter tokens are generated from DTCG JSON; CI fails if generated output drifts.
+- OpenAPI Generator is pinned via `tools/openapi/openapitools.json`
+- CI validates OpenAPI and regenerates stubs; it fails on `git diff --exit-code`
+- Generated outputs under `services/*/generated` are committed
+- Flutter tokens are generated from DTCG JSON; CI fails if generated output drifts
+
+---
+
+## Development rules
+
+- **Fail closed**: missing permissions/evidence blocks workflows
+- **No claims** of legal appointment or medical verification
+- **Keep contracts explicit**: generated code stays generated
+- **Prefer consistent error shapes** (ProblemDetails) and request IDs once Phase 2 lands
+
+---
+
+## Roadmap (high level)
+
+- **Phase 0**: repo hygiene + generation is green and deterministic
+- **Phase 1**: local dev runs (all services boot + migrations reliable)
+- **Phase 2**: auth + tiered RBAC + ProblemDetails everywhere
+- **Phase 3**: Vault flows + pack exports + audit persistence + verifier wiring
