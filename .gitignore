@@ -1,0 +1,23 @@
+# macOS
+.DS_Store
+
+# Rust
+/target
+**/*.rs.bk
+
+# Dart/Flutter
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+/build/
+
+# Node
+node_modules/
+
+# Logs
+*.log
+
+# Env
+.env

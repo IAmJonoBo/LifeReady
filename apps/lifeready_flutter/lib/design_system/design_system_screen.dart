@@ -32,7 +32,10 @@ class DesignSystemScreen extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Tokens', style: Theme.of(context).textTheme.titleMedium),
+                      Text(
+                        'Tokens',
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
                       SizedBox(height: t.s2),
                       Text(
                         'Browse colors, type scale, and spacing.',
@@ -76,7 +79,10 @@ class DesignSystemScreen extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Emergency Pack', style: Theme.of(context).textTheme.titleMedium),
+                Text(
+                  'Emergency Pack',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
                 SizedBox(height: t.s2),
                 Text(
                   'Quick access bundle with directives and contacts.',
@@ -111,11 +117,17 @@ class DesignSystemScreen extends StatelessWidget {
                       mainAxisSize: MainAxisSize.min,
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('Export Pack', style: Theme.of(context).textTheme.titleMedium),
+                        Text(
+                          'Export Pack',
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
                         SizedBox(height: t.s2),
                         Text('Ready to export the submission bundle?'),
                         SizedBox(height: t.s4),
-                        LrButton(label: 'Confirm', onPressed: () => Navigator.pop(context)),
+                        LrButton(
+                          label: 'Confirm',
+                          onPressed: () => Navigator.pop(context),
+                        ),
                       ],
                     ),
                   );
@@ -124,7 +136,8 @@ class DesignSystemScreen extends StatelessWidget {
               LrButton(
                 label: 'Show Toast',
                 variant: LrButtonVariant.outline,
-                onPressed: () => LrToast.show(context, message: 'Audit proof generated.'),
+                onPressed: () =>
+                    LrToast.show(context, message: 'Audit proof generated.'),
               ),
             ],
           ),

@@ -10,10 +10,8 @@ class LrSheet {
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(t.rLg)),
       ),
-      builder: (context) => Padding(
-        padding: EdgeInsets.all(t.s5),
-        child: child,
-      ),
+      builder: (context) =>
+          Padding(padding: EdgeInsets.all(t.s5), child: child),
     );
   }
 }

@@ -30,10 +30,7 @@ class TokensScreen extends StatelessWidget {
     ];
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Tokens'),
-        backgroundColor: t.surface,
-      ),
+      appBar: AppBar(title: const Text('Tokens'), backgroundColor: t.surface),
       body: ListView(
         padding: EdgeInsets.all(t.s5),
         children: [
@@ -50,19 +47,21 @@ class TokensScreen extends StatelessWidget {
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: typeEntries
-                .map((entry) => Padding(
-                      padding: EdgeInsets.only(bottom: t.s3),
-                      child: Text(
-                        '${entry.label} ${entry.size.toStringAsFixed(0)}',
-                        style: TextStyle(
-                          fontFamily: t.fontFamily,
-                          fontSize: entry.size,
-                          fontWeight: entry.weight,
-                          height: t.lineHeightNormal,
-                          color: t.text,
-                        ),
+                .map(
+                  (entry) => Padding(
+                    padding: EdgeInsets.only(bottom: t.s3),
+                    child: Text(
+                      '${entry.label} ${entry.size.toStringAsFixed(0)}',
+                      style: TextStyle(
+                        fontFamily: t.fontFamily,
+                        fontSize: entry.size,
+                        fontWeight: entry.weight,
+                        height: t.lineHeightNormal,
+                        color: t.text,
                       ),
-                    ))
+                    ),
+                  ),
+                )
                 .toList(),
           ),
           SizedBox(height: t.s6),
@@ -96,10 +95,16 @@ class TokensScreen extends StatelessWidget {
       padding: EdgeInsets.only(bottom: t.s2),
       child: Row(
         children: [
-          SizedBox(width: 50, child: Text(label, style: Theme.of(context).textTheme.bodyMedium)),
+          SizedBox(
+            width: 50,
+            child: Text(label, style: Theme.of(context).textTheme.bodyMedium),
+          ),
           Container(height: 12, width: value, color: t.primary),
           SizedBox(width: t.s3),
-          Text(value.toStringAsFixed(0), style: Theme.of(context).textTheme.bodyMedium),
+          Text(
+            value.toStringAsFixed(0),
+            style: Theme.of(context).textTheme.bodyMedium,
+          ),
         ],
       ),
     );

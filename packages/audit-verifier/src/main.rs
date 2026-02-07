@@ -65,7 +65,10 @@ fn main() {
 
     if let Some(expected) = args.head_hash {
         if expected != last_hash {
-            eprintln!("Head hash mismatch: expected {}, got {}", expected, last_hash);
+            eprintln!(
+                "Head hash mismatch: expected {}, got {}",
+                expected, last_hash
+            );
             std::process::exit(1);
         }
     }

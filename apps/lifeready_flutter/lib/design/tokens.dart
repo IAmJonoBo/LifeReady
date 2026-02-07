@@ -41,15 +41,17 @@ class Tokens {
   double get lineHeightTight => GeneratedTokens.lineHeightTight;
   double get lineHeightNormal => GeneratedTokens.lineHeightNormal;
 
-  Duration get motionFast => Duration(milliseconds: GeneratedTokens.motionFastMs);
-  Duration get motionNormal => Duration(milliseconds: GeneratedTokens.motionNormalMs);
+  Duration get motionFast =>
+      Duration(milliseconds: GeneratedTokens.motionFastMs);
+  Duration get motionNormal =>
+      Duration(milliseconds: GeneratedTokens.motionNormalMs);
 
   Curve get curveStandard => Cubic(
-        GeneratedTokens.curveStandard[0],
-        GeneratedTokens.curveStandard[1],
-        GeneratedTokens.curveStandard[2],
-        GeneratedTokens.curveStandard[3],
-      );
+    GeneratedTokens.curveStandard[0],
+    GeneratedTokens.curveStandard[1],
+    GeneratedTokens.curveStandard[2],
+    GeneratedTokens.curveStandard[3],
+  );
 
   FontWeight _weight(double value) {
     return FontWeight.values[((value / 100).round() - 1).clamp(0, 8)];

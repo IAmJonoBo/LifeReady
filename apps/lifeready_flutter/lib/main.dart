@@ -26,7 +26,9 @@ class _LifeReadyAppState extends State<LifeReadyApp> {
       future: _tokens,
       builder: (context, snapshot) {
         if (!snapshot.hasData) {
-          return const MaterialApp(home: Scaffold(body: Center(child: CircularProgressIndicator())));
+          return const MaterialApp(
+            home: Scaffold(body: Center(child: CircularProgressIndicator())),
+          );
         }
         final tokens = snapshot.data!;
         return TokensScope(

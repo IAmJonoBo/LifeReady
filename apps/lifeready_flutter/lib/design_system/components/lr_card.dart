@@ -5,11 +5,7 @@ class LrCard extends StatelessWidget {
   final Widget child;
   final EdgeInsetsGeometry? padding;
 
-  const LrCard({
-    super.key,
-    required this.child,
-    this.padding,
-  });
+  const LrCard({super.key, required this.child, this.padding});
 
   @override
   Widget build(BuildContext context) {

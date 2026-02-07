@@ -16,6 +16,9 @@ help:
 	@echo "  make generate-axum-<service>     Generate stubs for a single service"
 	@echo "  make generate-flutter-tokens    Regenerate Flutter tokens from DTCG JSON"
 	@echo "  make flutter-check              Run tokens + analyze + test for Flutter"
+	@echo "  make dev-up                     Start local dev services"
+	@echo "  make dev-down                   Stop local dev services"
+	@echo "  make db-migrate                 Run service migrations"
 	@echo "  make clean-generated      Remove generated outputs"
 	@echo ""
 	@echo "Options:"
@@ -52,3 +55,21 @@ flutter-check: generate-flutter-tokens
 	@cd apps/lifeready_flutter && flutter pub get
 	@cd apps/lifeready_flutter && flutter analyze
 	@cd apps/lifeready_flutter && flutter test
+
+.PHONY: dev-up
+dev-up:
+	docker compose up -d
+
+.PHONY: dev-down
+dev-down:
+	docker compose down -v
+
+.PHONY: db-migrate
+db-migrate:
+	@echo "Running migrations for services with migrations/..."
+	@for svc in audit-service estate-service vault-service case-service ; do \
+	  if [ -d services/$$svc/migrations ]; then \
+	    echo " - $$svc"; \
+	    sqlx migrate run --source services/$$svc/migrations ; \
+	  fi \
+	done

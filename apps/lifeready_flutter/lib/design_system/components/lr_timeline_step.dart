@@ -32,16 +32,9 @@ class LrTimelineStep extends StatelessWidget {
             Container(
               width: 14,
               height: 14,
-              decoration: BoxDecoration(
-                color: color,
-                shape: BoxShape.circle,
-              ),
+              decoration: BoxDecoration(color: color, shape: BoxShape.circle),
             ),
-            Container(
-              width: 2,
-              height: 36,
-              color: color.withOpacity(0.4),
-            ),
+            Container(width: 2, height: 36, color: color.withOpacity(0.4)),
           ],
         ),
         SizedBox(width: t.s4),

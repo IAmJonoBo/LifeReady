@@ -4,11 +4,7 @@ import 'tokens.dart';
 class TokensScope extends InheritedWidget {
   final Tokens tokens;
 
-  const TokensScope({
-    super.key,
-    required this.tokens,
-    required super.child,
-  });
+  const TokensScope({super.key, required this.tokens, required super.child});
 
   static Tokens of(BuildContext context) {
     final scope = context.dependOnInheritedWidgetOfExactType<TokensScope>();

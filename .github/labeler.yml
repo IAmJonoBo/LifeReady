@@ -1,0 +1,10 @@
+docs:
+  - "docs/**"
+contracts:
+  - "packages/contracts/**"
+flutter:
+  - "apps/lifeready_flutter/**"
+services:
+  - "services/**"
+ci:
+  - ".github/workflows/**"

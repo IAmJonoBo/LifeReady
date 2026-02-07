@@ -10,6 +10,7 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
+use std::net::SocketAddr;
 use tokio::sync::Mutex;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -54,6 +55,15 @@ pub fn app() -> Router {
         .route("/v1/audit/events", post(append_audit_event))
         .route("/v1/audit/export", get(export_audit))
         .with_state(state)
+}
+
+pub fn addr_from_env(default_port: u16) -> SocketAddr {
+    let host = std::env::var("HOST").unwrap_or_else(|_| "0.0.0.0".into());
+    let port = std::env::var("PORT")
+        .ok()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(default_port);
+    format!("{host}:{port}").parse().expect("valid host:port")
 }
 
 pub fn compute_event_hash(prev_hash: &str, event: &AuditEvent) -> String {
@@ -105,7 +115,10 @@ async fn append_audit_event(
     Json(input): Json<AuditAppend>,
 ) -> Result<(StatusCode, Json<AuditEventResponse>), StatusCode> {
     let mut events = state.events.lock().await;
-    let prev_hash = events.last().map(|e| e.event_hash.clone()).unwrap_or_else(zero_hash);
+    let prev_hash = events
+        .last()
+        .map(|e| e.event_hash.clone())
+        .unwrap_or_else(zero_hash);
     let now = Utc::now().to_rfc3339();
 
     let mut event = AuditEvent {
@@ -133,7 +146,10 @@ async fn export_audit(
     _query: axum::extract::Query<AuditExportQuery>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let events = state.events.lock().await;
-    let head_hash = events.last().map(|e| e.event_hash.clone()).unwrap_or_else(zero_hash);
+    let head_hash = events
+        .last()
+        .map(|e| e.event_hash.clone())
+        .unwrap_or_else(zero_hash);
     let response = serde_json::json!({
         "download_url": format!("https://api.lifeready.local/audit/exports/{}", head_hash),
         "expires_at": Utc::now().to_rfc3339(),
@@ -143,33 +159,5 @@ async fn export_audit(
 }
 
 fn uuid() -> String {
-    let bytes = rand_bytes(16);
-    let mut b = bytes;
-    b[6] = (b[6] & 0x0f) | 0x40;
-    b[8] = (b[8] & 0x3f) | 0x80;
-    let hex = hex::encode(b);
-    format!(
-        "{}-{}-{}-{}-{}",
-        &hex[0..8],
-        &hex[8..12],
-        &hex[12..16],
-        &hex[16..20],
-        &hex[20..32]
-    )
-}
-
-fn rand_bytes(len: usize) -> Vec<u8> {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let mut seed = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("time")
-        .as_nanos() as u64;
-    let mut out = Vec::with_capacity(len);
-    for _ in 0..len {
-        seed ^= seed << 13;
-        seed ^= seed >> 7;
-        seed ^= seed << 17;
-        out.push((seed & 0xff) as u8);
-    }
-    out
+    uuid::Uuid::new_v4().to_string()
 }

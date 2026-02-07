@@ -1,0 +1,7 @@
+[term]
+verbose = false
+
+[alias]
+fmtall = "fmt --all"
+clippyall = "clippy --workspace --all-targets --all-features -- -D warnings"
+testall = "test --workspace --all-targets --all-features"
