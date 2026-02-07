@@ -11,6 +11,8 @@ SPECS="${1-}"
 SERVICE_FILTER="${2-}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TOOLS_DIR="${REPO_ROOT}/tools/openapi"
+OPENAPI_CLI="${TOOLS_DIR}/node_modules/.bin/openapi-generator-cli"
+ROOT_FROM_TOOLS="../.."
 
 if [[ -z ${SPECS} ]]; then
 	echo "ERR: No specs provided." >&2
@@ -29,7 +31,7 @@ if [[ ! -f "${TOOLS_DIR}/openapitools.json" ]]; then
 	exit 2
 fi
 
-if [[ ! -x "${TOOLS_DIR}/node_modules/.bin/openapi-generator-cli" ]]; then
+if [[ ! -x ${OPENAPI_CLI} ]]; then
 	echo "ERR: openapi-generator-cli not installed (would exit 127)." >&2
 	echo "Install: npm install --prefix tools/openapi" >&2
 	exit 127
@@ -47,8 +49,15 @@ echo "Validating OpenAPI specs with openapi-generator-cli validate..."
 
 fail=0
 for spec in "${files[@]}"; do
-	base="$(basename "${spec}")"
+	spec_path="${spec}"
+	if [[ ${spec_path} != /* ]]; then
+		spec_path="${REPO_ROOT}/${spec_path}"
+	fi
+
+	base="$(basename "${spec_path}")"
 	svc="${base%.openapi.yaml}"
+	spec_rel="${spec_path#${REPO_ROOT}/}"
+	spec_arg="${ROOT_FROM_TOOLS}/${spec_rel}"
 
 	# Optional service filter: SERVICE should match directory name or spec stem.
 	if [[ -n ${SERVICE_FILTER} ]]; then
@@ -59,9 +68,9 @@ for spec in "${files[@]}"; do
 		fi
 	fi
 
-	echo " - ${spec}"
-	if ! (cd "${TOOLS_DIR}" && npx openapi-generator-cli validate -i "${spec}" --recommend); then
-		echo "   FAIL: ${spec}" >&2
+	echo " - ${spec_path}"
+	if ! (cd "${TOOLS_DIR}" && "${OPENAPI_CLI}" validate -i "${spec_arg}" --recommend); then
+		echo "   FAIL: ${spec_path}" >&2
 		fail=1
 	fi
 done

@@ -11,6 +11,8 @@ async fn main() {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
+    let _db = vault_service::check_db().await;
+
     let app = vault_service::router().layer(TraceLayer::new_for_http());
     let addr = vault_service::addr_from_env(8083);
 

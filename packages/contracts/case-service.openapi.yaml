@@ -65,6 +65,34 @@ paths:
         default:
           $ref: "./common.openapi.yaml#/components/responses/ProblemDetails"
 
+  /v1/cases/{case_id}/evidence/{slot_name}:
+    put:
+      tags: [cases]
+      security: [{ bearerAuth: [] }]
+      summary: Attach evidence document to a slot
+      parameters:
+        - in: path
+          name: case_id
+          required: true
+          schema: { $ref: "#/components/schemas/Uuid" }
+        - in: path
+          name: slot_name
+          required: true
+          schema: { type: string, maxLength: 120 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/EvidenceAttach" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EvidenceSlot" }
+        default:
+          $ref: "./common.openapi.yaml#/components/responses/ProblemDetails"
+
 components:
   securitySchemes:
     bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
@@ -136,3 +164,15 @@ components:
         manifest_sha256:
           type: string
           pattern: "^[a-f0-9]{64}$"
+    EvidenceAttach:
+      type: object
+      required: [document_id]
+      properties:
+        document_id: { $ref: "#/components/schemas/Uuid" }
+    EvidenceSlot:
+      type: object
+      required: [slot_name, document_id, added_at]
+      properties:
+        slot_name: { type: string }
+        document_id: { $ref: "#/components/schemas/Uuid" }
+        added_at: { $ref: "#/components/schemas/IsoDateTime" }

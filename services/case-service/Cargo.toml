@@ -15,8 +15,16 @@ tracing-subscriber.workspace = true
 uuid.workspace = true
 sqlx.workspace = true
 chrono.workspace = true
+lifeready-auth.workspace = true
+lifeready-audit.workspace = true
+sha2 = "0.10"
+hex = "0.4"
 
 [dev-dependencies]
 bytes = "1"
 http-body-util = "0.1"
 tower = { version = "0.5", features = ["util"] }
+audit_verifier = { path = "../../packages/audit-verifier" }
+tempfile = "3.10"
+vault_service = { path = "../vault-service" }
+audit_service = { path = "../audit-service" }

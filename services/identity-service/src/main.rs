@@ -11,6 +11,8 @@ async fn main() {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
+    let _db = identity_service::check_db().await;
+
     let app = identity_service::router().layer(TraceLayer::new_for_http());
     let addr = identity_service::addr_from_env(8081);
 

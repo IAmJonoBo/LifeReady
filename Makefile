@@ -29,7 +29,7 @@ help:
 
 .PHONY: validate-openapi
 validate-openapi:
-	@$(SCRIPTS_DIR)/validate-openapi.sh $(or $(SPECS),$(OPENAPI_SPECS)) $(SERVICE)
+	@$(SCRIPTS_DIR)/validate-openapi.sh "$(or $(SPECS),$(OPENAPI_SPECS))" $(SERVICE)
 
 .PHONY: validate-openapi-%
 validate-openapi-%:
@@ -37,7 +37,7 @@ validate-openapi-%:
 
 .PHONY: generate-axum
 generate-axum:
-	@$(SCRIPTS_DIR)/generate-axum.sh $(or $(SPECS),$(OPENAPI_SPECS)) $(SERVICE)
+	@$(SCRIPTS_DIR)/generate-axum.sh "$(or $(SPECS),$(OPENAPI_SPECS))" $(SERVICE)
 
 .PHONY: generate-axum-%
 generate-axum-%:

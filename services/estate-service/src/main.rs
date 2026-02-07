@@ -11,6 +11,8 @@ async fn main() {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
+    let _db = estate_service::check_db().await;
+
     let app = estate_service::router().layer(TraceLayer::new_for_http());
     let addr = estate_service::addr_from_env(8082);
 

@@ -12,6 +12,8 @@ async fn main() {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
+    let _db = audit_service::check_db().await;
+
     let app = app().layer(TraceLayer::new_for_http());
 
     let addr = addr_from_env(8085);

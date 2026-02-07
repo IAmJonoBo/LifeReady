@@ -15,6 +15,10 @@ SERVICE_FILTER="${2-}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TOOLS_DIR="${REPO_ROOT}/tools/openapi"
 CONFIG_FILE="${OPENAPI_GENERATOR_CONFIG:-${REPO_ROOT}/packages/contracts/openapi-generator.base.yaml}"
+OPENAPI_CLI="${TOOLS_DIR}/node_modules/.bin/openapi-generator-cli"
+ROOT_FROM_TOOLS="../.."
+CONFIG_REL="${CONFIG_FILE#${REPO_ROOT}/}"
+CONFIG_ARG="${ROOT_FROM_TOOLS}/${CONFIG_REL}"
 
 if [[ -z ${SPECS} ]]; then
 	echo "ERR: No specs provided." >&2
@@ -33,7 +37,7 @@ if [[ ! -f "${TOOLS_DIR}/openapitools.json" ]]; then
 	exit 2
 fi
 
-if [[ ! -x "${TOOLS_DIR}/node_modules/.bin/openapi-generator-cli" ]]; then
+if [[ ! -x ${OPENAPI_CLI} ]]; then
 	echo "ERR: openapi-generator-cli not installed (would exit 127)." >&2
 	echo "Install: npm install --prefix tools/openapi" >&2
 	exit 127
@@ -53,28 +57,35 @@ fi
 echo "Generating Rust Axum stubs from OpenAPI specs..."
 
 for spec in "${files[@]}"; do
-	base="$(basename "${spec}")"
+	spec_path="${spec}"
+	if [[ ${spec_path} != /* ]]; then
+		spec_path="${REPO_ROOT}/${spec_path}"
+	fi
+
+	base="$(basename "${spec_path}")"
 	svc="${base%.openapi.yaml}"
 
 	if [[ -n ${SERVICE_FILTER} && ${svc} != "${SERVICE_FILTER}" ]]; then
 		continue
 	fi
 
-	out_dir="services/${svc}/generated"
+	out_dir="${REPO_ROOT}/services/${svc}/generated"
+	out_rel="services/${svc}/generated"
+	out_arg="${ROOT_FROM_TOOLS}/${out_rel}"
 	mkdir -p "${out_dir}"
 
-	echo " - ${svc}: ${spec} -> ${out_dir}"
+	echo " - ${svc}: ${spec_path} -> ${out_dir}"
 
 	# Clean output to avoid stale artifacts.
 	rm -rf "${out_dir:?}/"*
 
 	# Minimal, stable generator flags.
 	# You can later add a config file per service if you want custom templates/package naming.
-	(cd "${TOOLS_DIR}" && npx openapi-generator-cli generate \
+	(cd "${TOOLS_DIR}" && "${OPENAPI_CLI}" generate \
 		-g rust-axum \
-		-i "${spec}" \
-		-o "${out_dir}" \
-		-c "${CONFIG_FILE}" \
+		-i "${ROOT_FROM_TOOLS}/${spec_path#${REPO_ROOT}/}" \
+		-o "${out_arg}" \
+		-c "${CONFIG_ARG}" \
 		--additional-properties=packageName="${svc//-/_}",crateName="${svc//-/_}")
 
 done

@@ -9,6 +9,22 @@ tags:
   - name: documents
 paths:
   /v1/documents:
+    get:
+      tags: [documents]
+      security: [{ bearerAuth: [] }]
+      summary: List document metadata
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DocumentList" }
+        default:
+          $ref: "./common.openapi.yaml#/components/responses/ProblemDetails"
     post:
       tags: [documents]
       security: [{ bearerAuth: [] }]
@@ -139,3 +155,10 @@ components:
           type: array
           items: { type: string }
         created_at: { $ref: "#/components/schemas/IsoDateTime" }
+    DocumentList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Document" }

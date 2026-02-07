@@ -75,8 +75,9 @@ components:
         event_hash: { type: string, pattern: "^[a-f0-9]{64}$" }
     AuditExport:
       type: object
-      required: [download_url, expires_at, head_hash]
+      required: [download_url, expires_at, head_hash, events_sha256]
       properties:
         download_url: { type: string, format: uri }
         expires_at: { $ref: "#/components/schemas/IsoDateTime" }
         head_hash: { type: string, pattern: "^[a-f0-9]{64}$" }
+        events_sha256: { type: string, pattern: "^[a-f0-9]{64}$" }
