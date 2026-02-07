@@ -1,0 +1,133 @@
+openapi: 3.1.0
+info:
+  title: LifeReady Identity Service
+  version: 0.1.0
+jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
+servers:
+  - url: https://api.lifeready.local/identity
+tags:
+  - name: auth
+  - name: devices
+paths:
+  /v1/auth/login:
+    post:
+      tags: [auth]
+      summary: Start login (passwordless or password)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Challenge created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginChallenge"
+        default:
+          $ref: "./common.openapi.yaml#/components/responses/ProblemDetails"
+  /v1/auth/mfa/verify:
+    post:
+      tags: [auth]
+      summary: Verify MFA challenge
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MfaVerifyRequest"
+      responses:
+        "200":
+          description: Session issued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Session"
+        default:
+          $ref: "./common.openapi.yaml#/components/responses/ProblemDetails"
+  /v1/me:
+    get:
+      tags: [auth]
+      summary: Get current user
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Current principal profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Me"
+        default:
+          $ref: "./common.openapi.yaml#/components/responses/ProblemDetails"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    Email:
+      type: string
+      format: email
+      maxLength: 320
+    Uuid: { $ref: "./common.openapi.yaml#/components/schemas/Uuid" }
+    IsoDateTime:
+      { $ref: "./common.openapi.yaml#/components/schemas/IsoDateTime" }
+    LoginRequest:
+      type: object
+      required: [email]
+      properties:
+        email: { $ref: "#/components/schemas/Email" }
+        password:
+          type: string
+          minLength: 8
+          maxLength: 256
+        client:
+          type: object
+          required: [platform]
+          properties:
+            platform:
+              type: string
+              enum: [android, ios, web]
+            device_name:
+              type: string
+              maxLength: 64
+    LoginChallenge:
+      type: object
+      required: [challenge_id, mfa_required]
+      properties:
+        challenge_id: { $ref: "#/components/schemas/Uuid" }
+        mfa_required: { type: boolean }
+        mfa_methods:
+          type: array
+          items:
+            type: string
+            enum: [totp, weauthn, passkey]
+    MfaVerifyRequest:
+      type: object
+      required: [challenge_id, method, code]
+      properties:
+        challenge_id: { $ref: "#/components/schemas/Uuid" }
+        method:
+          type: string
+          enum: [totp, weauthn, passkey]
+        code:
+          type: string
+          minLength: 4
+          maxLength: 64
+    Session:
+      type: object
+      required: [access_token, expires_at]
+      properties:
+        access_token: { type: string, minLength: 16 }
+        expires_at: { $ref: "#/components/schemas/IsoDateTime" }
+    Me:
+      type: object
+      required: [principal_id, email]
+      properties:
+        principal_id: { $ref: "#/components/schemas/Uuid" }
+        email: { $ref: "#/components/schemas/Email" }
+        display_name: { type: string, maxLength: 80 }

@@ -1,0 +1,37 @@
+openapi: 3.1.0
+info:
+  title: LifeReady Common Schemas
+  version: 0.1.0
+jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
+components:
+  schemas:
+    Uuid: { type: string, format: uuid }
+    RequestId: { type: string, format: uuid }
+    IsoDateTime: { type: string, format: date-time }
+    SensitivityTier:
+      type: string
+      enum: [green, amber, red]
+    Role:
+      type: string
+      enum: [principal, proxy, executor_nominee, emergency_contact]
+    ProblemDetails:
+      type: object
+      required: [type, title, status]
+      properties:
+        type: { type: string, format: uri }
+        title: { type: string, maxLength: 200 }
+        status: { type: integer, minimum: 100, maximum: 599 }
+        detail: { type: string, maxLength: 2000 }
+        instance: { type: string, format: uri }
+        request_id: { $ref: "#/components/schemas/RequestId" }
+        errors:
+          type: object
+          additionalProperties:
+            type: array
+            items: { type: string, maxLength: 200 }
+  responses:
+    ProblemDetails:
+      description: Error response
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/ProblemDetails" }

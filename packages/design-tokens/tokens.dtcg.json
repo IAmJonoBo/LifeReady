@@ -1,0 +1,63 @@
+{
+  "$schema": "https://design-tokens.github.io/community-group/format/draft/",
+  "lifeready": {
+    "meta": {
+      "brand": { "$type": "string", "$value": "LifeReady SA" },
+      "version": { "$type": "string", "$value": "0.1.0" }
+    },
+    "color": {
+      "surface": { "$type": "color", "$value": "#0B0C0F" },
+      "surfaceAlt": { "$type": "color", "$value": "#12141A" },
+      "text": { "$type": "color", "$value": "#F5F7FF" },
+      "textMuted": { "$type": "color", "$value": "#B8BECC" },
+      "primary": { "$type": "color", "$value": "#7C5CFF" },
+      "danger": { "$type": "color", "$value": "#FF4D4D" },
+      "success": { "$type": "color", "$value": "#3DE07E" },
+      "warning": { "$type": "color", "$value": "#FFB020" },
+      "outline": { "$type": "color", "$value": "#2A2F3A" }
+    },
+    "radius": {
+      "xs": { "$type": "dimension", "$value": "6" },
+      "sm": { "$type": "dimension", "$value": "10" },
+      "md": { "$type": "dimension", "$value": "16" },
+      "lg": { "$type": "dimension", "$value": "24" }
+    },
+    "space": {
+      "1": { "$type": "dimension", "$value": "4" },
+      "2": { "$type": "dimension", "$value": "8" },
+      "3": { "$type": "dimension", "$value": "12" },
+      "4": { "$type": "dimension", "$value": "16" },
+      "5": { "$type": "dimension", "$value": "24" },
+      "6": { "$type": "dimension", "$value": "32" }
+    },
+    "type": {
+      "fontFamily": { "$type": "fontFamily", "$value": "Inter" },
+      "size": {
+        "xs": { "$type": "fontSize", "$value": "12" },
+        "sm": { "$type": "fontSize", "$value": "14" },
+        "md": { "$type": "fontSize", "$value": "16" },
+        "lg": { "$type": "fontSize", "$value": "18" },
+        "xl": { "$type": "fontSize", "$value": "22" },
+        "2xl": { "$type": "fontSize", "$value": "28" }
+      },
+      "weight": {
+        "regular": { "$type": "fontWeight", "$value": "400" },
+        "medium": { "$type": "fontWeight", "$value": "500" },
+        "semibold": { "$type": "fontWeight", "$value": "600" }
+      },
+      "lineHeight": {
+        "tight": { "$type": "dimension", "$value": "1.15" },
+        "normal": { "$type": "dimension", "$value": "1.35" }
+      }
+    },
+    "motion": {
+      "duration": {
+        "fast": { "$type": "duration", "$value": "120" },
+        "normal": { "$type": "duration", "$value": "220" }
+      },
+      "curve": {
+        "standard": { "$type": "cubicBezier", "$value": [0.2, 0.0, 0.0, 1.0] }
+      }
+    }
+  }
+}

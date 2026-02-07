@@ -1,0 +1,211 @@
+openapi: 3.1.0
+info:
+  title: LifeReady Estate Service
+  version: 0.1.0
+jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
+servers:
+  - url: https://api.lifeready.local/estate
+tags:
+  - name: people
+  - name: assets
+  - name: instructions
+  - name: roles
+paths:
+  /v1/people:
+    post:
+      tags: [people]
+      security: [{ bearerAuth: [] }]
+      summary: Create person (contact/role target)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PersonCreate" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Person" }
+        default:
+          $ref: "./common.openapi.yaml#/components/responses/ProblemDetails"
+    get:
+      tags: [people]
+      security: [{ bearerAuth: [] }]
+      summary: List people
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Person" }
+        default:
+          $ref: "./common.openapi.yaml#/components/responses/ProblemDetails"
+
+  /v1/assets:
+    post:
+      tags: [assets]
+      security: [{ bearerAuth: [] }]
+      summary: Create asset
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AssetCreate" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Asset" }
+        default:
+          $ref: "./common.openapi.yaml#/components/responses/ProblemDetails"
+
+  /v1/instructions:
+    post:
+      tags: [instructions]
+      security: [{ bearerAuth: [] }]
+      summary: Create instruction
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/InstructionCreate" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Instruction" }
+        default:
+          $ref: "./common.openapi.yaml#/components/responses/ProblemDetails"
+
+  /v1/roles/grants:
+    post:
+      tags: [roles]
+      security: [{ bearerAuth: [] }]
+      summary: Invite & grant role scope (staged access policy enforced server-side)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RoleGrantCreate" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RoleGrant" }
+        default:
+          $ref: "./common.openapi.yaml#/components/responses/ProblemDetails"
+
+components:
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
+  schemas:
+    Uuid: { $ref: "./common.openapi.yaml#/components/schemas/Uuid" }
+    IsoDateTime:
+      { $ref: "./common.openapi.yaml#/components/schemas/IsoDateTime" }
+    SensitivityTier:
+      { $ref: "./common.openapi.yaml#/components/schemas/SensitivityTier" }
+    Role: { $ref: "./common.openapi.yaml#/components/schemas/Role" }
+    PersonCreate:
+      type: object
+      required: [full_name]
+      properties:
+        full_name: { type: string, maxLength: 120 }
+        email: { type: string, format: email }
+        phone_e164: { type: string, maxLength: 20 }
+        relationship: { type: string, maxLength: 80 }
+    Person:
+      allOf:
+        - $ref: "#/components/schemas/PersonCreate"
+        - type: object
+          required: [person_id, created_at]
+          properties:
+            person_id: { $ref: "#/components/schemas/Uuid" }
+            created_at: { $ref: "#/components/schemas/IsoDateTime" }
+
+    AssetCategory:
+      type: string
+      enum:
+        [
+          property,
+          bank_account,
+          insurance_policy,
+          vehicle,
+          business_interest,
+          digital_account,
+          other,
+        ]
+    AssetCreate:
+      type: object
+      required: [category, label]
+      properties:
+        category: { $ref: "#/components/schemas/AssetCategory" }
+        label: { type: string, maxLength: 120 }
+        notes: { type: string, maxLength: 4000 }
+        sensitivity: { $ref: "#/components/schemas/SensitivityTier" }
+    Asset:
+      allOf:
+        - $ref: "#/components/schemas/AssetCreate"
+        - type: object
+          required: [asset_id, created_at]
+          properties:
+            asset_id: { $ref: "#/components/schemas/Uuid" }
+            created_at: { $ref: "#/components/schemas/IsoDateTime" }
+
+    InstructionCreate:
+      type: object
+      required: [title, body]
+      properties:
+        title: { type: string, maxLength: 120 }
+        body: { type: string, maxLength: 10000 }
+        sensitivity: { $ref: "#/components/schemas/SensitivityTier" }
+    Instruction:
+      allOf:
+        - $ref: "#/components/schemas/InstructionCreate"
+        - type: object
+          required: [instruction_id, created_at]
+          properties:
+            instruction_id: { $ref: "#/components/schemas/Uuid" }
+            created_at: { $ref: "#/components/schemas/IsoDateTime" }
+
+    RoleGrantCreate:
+      type: object
+      required: [person_id, role, scope]
+      properties:
+        person_id: { $ref: "#/components/schemas/Uuid" }
+        role: { $ref: "#/components/schemas/Role" }
+        scope:
+          type: object
+          required: [access_level]
+          properties:
+            access_level:
+              type: string
+              enum: [read_only_packs, read_only_all, limited_write]
+            allowed_tiers:
+              type: array
+              items: { $ref: "#/components/schemas/SensitivityTier" }
+            expires_at: { $ref: "#/components/schemas/IsoDateTime" }
+    RoleGrant:
+      allOf:
+        - $ref: "#/components/schemas/RoleGrantCreate"
+        - type: object
+          required: [grant_id, status, created_at]
+          properties:
+            grant_id: { $ref: "#/components/schemas/Uuid" }
+            status:
+              type: string
+              enum: [invited, accepted, suspended, revoked]
+            created_at: { $ref: "#/components/schemas/IsoDateTime" }

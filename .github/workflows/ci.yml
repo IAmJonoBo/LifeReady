@@ -1,0 +1,92 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  openapi:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: tools/openapi/package-lock.json
+      - name: Install OpenAPI generator wrapper
+        run: npm install --prefix tools/openapi
+      - name: Validate OpenAPI specs
+        run: make validate-openapi
+      - name: Generate Rust Axum stubs
+        run: make generate-axum
+      - name: Fail on generated drift
+        run: git diff --exit-code
+
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Detect Rust workspace
+        id: rust
+        run: |
+          if ls services/**/Cargo.toml >/dev/null 2>&1; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: dtolnay/rust-toolchain@stable
+        if: steps.rust.outputs.found == 'true'
+        with:
+          components: rustfmt, clippy
+      - name: Cargo fmt
+        if: steps.rust.outputs.found == 'true'
+        run: cargo fmt --check
+      - name: Cargo clippy
+        if: steps.rust.outputs.found == 'true'
+        run: cargo clippy --workspace --all-targets --all-features
+      - name: Cargo test
+        if: steps.rust.outputs.found == 'true'
+        run: cargo test --workspace --all-targets --all-features
+
+  flutter:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Detect Flutter app
+        id: flutter
+        run: |
+          if [[ -f apps/lifeready_flutter/pubspec.yaml ]]; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: subosito/flutter-action@v2
+        if: steps.flutter.outputs.found == 'true'
+        with:
+          flutter-version: "stable"
+          cache: true
+      - name: Generate Flutter tokens
+        if: steps.flutter.outputs.found == 'true'
+        run: make generate-flutter-tokens
+      - name: Fail on token drift
+        if: steps.flutter.outputs.found == 'true'
+        run: git diff --exit-code
+      - name: Flutter analyze
+        if: steps.flutter.outputs.found == 'true'
+        working-directory: apps/lifeready_flutter
+        run: |
+          flutter pub get
+          flutter analyze
+      - name: Flutter test
+        if: steps.flutter.outputs.found == 'true'
+        working-directory: apps/lifeready_flutter
+        run: flutter test
+      - name: Fail on Flutter drift
+        if: steps.flutter.outputs.found == 'true'
+        run: git diff --exit-code
+      - name: Flutter build web
+        if: steps.flutter.outputs.found == 'true'
+        working-directory: apps/lifeready_flutter
+        run: flutter build web --release

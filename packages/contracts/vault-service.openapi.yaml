@@ -1,0 +1,141 @@
+openapi: 3.1.0
+info:
+  title: LifeReady Vault Service
+  version: 0.1.0
+jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
+servers:
+  - url: https://api.lifeready.local/vault
+tags:
+  - name: documents
+paths:
+  /v1/documents:
+    post:
+      tags: [documents]
+      security: [{ bearerAuth: [] }]
+      summary: Init document upload (server returns pre-signed upload target)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DocumentInit" }
+      responses:
+        "201":
+          description: Init OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DocumentInitResponse" }
+        default:
+          $ref: "./common.openapi.yaml#/components/responses/ProblemDetails"
+  /v1/documents/{document_id}/versions:
+    post:
+      tags: [documents]
+      security: [{ bearerAuth: [] }]
+      summary: Commit uploaded version (checksum required)
+      parameters:
+        - in: path
+          name: document_id
+          required: true
+          schema: { $ref: "#/components/schemas/Uuid" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DocumentCommit" }
+      responses:
+        "201":
+          description: Version committed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DocumentVersion" }
+        default:
+          $ref: "./common.openapi.yaml#/components/responses/ProblemDetails"
+  /v1/documents/{document_id}:
+    get:
+      tags: [documents]
+      security: [{ bearerAuth: [] }]
+      summary: Get document metadata
+      parameters:
+        - in: path
+          name: document_id
+          required: true
+          schema: { $ref: "#/components/schemas/Uuid" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Document" }
+        default:
+          $ref: "./common.openapi.yaml#/components/responses/ProblemDetails"
+components:
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
+  schemas:
+    Uuid: { $ref: "./common.openapi.yaml#/components/schemas/Uuid" }
+    IsoDateTime:
+      { $ref: "./common.openapi.yaml#/components/schemas/IsoDateTime" }
+    SensitivityTier:
+      { $ref: "./common.openapi.yaml#/components/schemas/SensitivityTier" }
+    DocumentType:
+      type: string
+      enum:
+        [
+          id,
+          proof_of_address,
+          will,
+          advance_directive,
+          medical_letter,
+          policy,
+          statement,
+          other,
+        ]
+    Sha256:
+      type: string
+      pattern: "^[a-f0-9]{64}$"
+    DocumentInit:
+      type: object
+      required: [document_type, title, sensitivity]
+      properties:
+        document_type: { $ref: "#/components/schemas/DocumentType" }
+        title: { type: string, maxLength: 160 }
+        sensitivity: { $ref: "#/components/schemas/SensitivityTier" }
+        tags:
+          type: array
+          items: { type: string, maxLength: 40 }
+    DocumentInitResponse:
+      type: object
+      required: [document_id, upload_url, upload_headers]
+      properties:
+        document_id: { $ref: "#/components/schemas/Uuid" }
+        upload_url: { type: string, format: uri }
+        upload_headers:
+          type: object
+          additionalProperties: { type: string }
+    DocumentCommit:
+      type: object
+      required: [blob_ref, sha256, byte_size, mime_type]
+      properties:
+        blob_ref: { type: string, maxLength: 512 }
+        sha256: { $ref: "#/components/schemas/Sha256" }
+        byte_size: { type: integer, minimum: 1, maximum: 52428800 }
+        mime_type: { type: string, maxLength: 80 }
+    DocumentVersion:
+      type: object
+      required: [document_id, version_id, sha256, created_at]
+      properties:
+        document_id: { $ref: "#/components/schemas/Uuid" }
+        version_id: { $ref: "#/components/schemas/Uuid" }
+        sha256: { $ref: "#/components/schemas/Sha256" }
+        created_at: { $ref: "#/components/schemas/IsoDateTime" }
+    Document:
+      type: object
+      required: [document_id, document_type, title, sensitivity, created_at]
+      properties:
+        document_id: { $ref: "#/components/schemas/Uuid" }
+        document_type: { $ref: "#/components/schemas/DocumentType" }
+        title: { type: string }
+        sensitivity: { $ref: "#/components/schemas/SensitivityTier" }
+        tags:
+          type: array
+          items: { type: string }
+        created_at: { $ref: "#/components/schemas/IsoDateTime" }
