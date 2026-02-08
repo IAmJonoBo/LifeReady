@@ -6,16 +6,20 @@ use axum::{
 };
 use chrono::Utc;
 use lifeready_auth::{
-    auth_middleware, authorize, conflict, invalid_request, not_found, request_id_middleware,
-    AccessLevel, AuthConfig, AuthLayerState, Claims, RequestId, RequiredAccess, Role,
-    SensitivityTier,
+    conflict, invalid_request, not_found, request_id_middleware, AuthConfig, AuthLayer,
+    RequestContext, RequestId,
+};
+use lifeready_policy::{
+    require_role, require_scope, require_scope_any, require_tier, Role, SensitivityTier,
+    TierRequirement,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use sqlx::{PgPool, Row};
 use std::fs;
-use std::{net::SocketAddr, time::Duration};
+use std::net::SocketAddr;
+use std::sync::Arc;
 use std::{path::PathBuf, str::FromStr};
 
 #[derive(Clone)]
@@ -31,6 +35,7 @@ pub fn router() -> Router {
         export_dir: export_dir_from_env(),
         storage_dir: storage_dir_from_env(),
     };
+    let auth_config = Arc::new(AuthConfig::from_env());
 
     Router::new()
         .route("/healthz", get(healthz))
@@ -42,10 +47,7 @@ pub fn router() -> Router {
             put(attach_evidence),
         )
         .with_state(state)
-        .layer(axum::middleware::from_fn_with_state(
-            AuthLayerState::new(AuthConfig::from_env(), Vec::<&'static str>::new()),
-            auth_middleware,
-        ))
+        .layer(AuthLayer::new(auth_config))
         .layer(axum::middleware::from_fn(request_id_middleware))
 }
 
@@ -54,6 +56,7 @@ async fn healthz() -> &'static str {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct EmergencyContact {
     name: String,
     phone_e164: String,
@@ -61,6 +64,7 @@ struct EmergencyContact {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct EmergencyPackRequest {
     directive_document_ids: Vec<String>,
     emergency_contacts: Vec<EmergencyContact>,
@@ -125,7 +129,7 @@ struct ManifestDocument {
 
 async fn create_emergency_pack(
     State(state): State<AppState>,
-    Extension(claims): Extension<Claims>,
+    ctx: RequestContext,
     Extension(request_id): Extension<RequestId>,
     Json(payload): Json<EmergencyPackRequest>,
 ) -> Result<(StatusCode, Json<CaseResponse>), axum::response::Response> {
@@ -133,14 +137,13 @@ async fn create_emergency_pack(
         Some(pool) => pool,
         None => return Err(invalid_request(Some(request_id), "database unavailable")),
     };
-    let required = RequiredAccess {
-        min_tier: SensitivityTier::Amber,
-        access_level: AccessLevel::LimitedWrite,
-        allowed_roles: Some(vec![Role::Principal, Role::Proxy]),
-    };
-    authorize(&claims, &required).map_err(|error| error.into_response(Some(request_id)))?;
+    require_role(&ctx, &[Role::Principal, Role::Proxy])
+        .map_err(|error| error.into_response(Some(request_id)))?;
+    require_tier(&ctx, TierRequirement::Min(SensitivityTier::Amber))
+        .map_err(|error| error.into_response(Some(request_id)))?;
+    require_scope(&ctx, "write:limited").map_err(|error| error.into_response(Some(request_id)))?;
 
-    let principal_id = parse_uuid(&claims.sub)
+    let principal_id = parse_uuid(&ctx.principal_id)
         .ok_or_else(|| invalid_request(Some(request_id), "invalid principal_id"))?;
 
     let row = sqlx::query(
@@ -181,7 +184,7 @@ async fn create_emergency_pack(
 
 async fn create_mhca39(
     State(state): State<AppState>,
-    Extension(claims): Extension<Claims>,
+    ctx: RequestContext,
     Extension(request_id): Extension<RequestId>,
     Json(payload): Json<Mhca39Create>,
 ) -> Result<(StatusCode, Json<CaseResponse>), axum::response::Response> {
@@ -189,14 +192,13 @@ async fn create_mhca39(
         Some(pool) => pool,
         None => return Err(invalid_request(Some(request_id), "database unavailable")),
     };
-    let required = RequiredAccess {
-        min_tier: SensitivityTier::Amber,
-        access_level: AccessLevel::LimitedWrite,
-        allowed_roles: Some(vec![Role::Principal, Role::Proxy]),
-    };
-    authorize(&claims, &required).map_err(|error| error.into_response(Some(request_id)))?;
+    require_role(&ctx, &[Role::Principal, Role::Proxy])
+        .map_err(|error| error.into_response(Some(request_id)))?;
+    require_tier(&ctx, TierRequirement::Min(SensitivityTier::Amber))
+        .map_err(|error| error.into_response(Some(request_id)))?;
+    require_scope(&ctx, "write:limited").map_err(|error| error.into_response(Some(request_id)))?;
 
-    let principal_id = parse_uuid(&claims.sub)
+    let principal_id = parse_uuid(&ctx.principal_id)
         .ok_or_else(|| invalid_request(Some(request_id), "invalid principal_id"))?;
     let subject_person_id = parse_uuid(&payload.subject_person_id)
         .ok_or_else(|| invalid_request(Some(request_id), "invalid subject_person_id"))?;
@@ -274,7 +276,7 @@ async fn create_mhca39(
 
 async fn attach_evidence(
     State(state): State<AppState>,
-    Extension(claims): Extension<Claims>,
+    ctx: RequestContext,
     Extension(request_id): Extension<RequestId>,
     Path((case_id, slot_name)): Path<(String, String)>,
     Json(payload): Json<EvidenceAttach>,
@@ -283,16 +285,15 @@ async fn attach_evidence(
         Some(pool) => pool,
         None => return Err(invalid_request(Some(request_id), "database unavailable")),
     };
-    let required = RequiredAccess {
-        min_tier: SensitivityTier::Amber,
-        access_level: AccessLevel::LimitedWrite,
-        allowed_roles: Some(vec![Role::Principal, Role::Proxy]),
-    };
-    authorize(&claims, &required).map_err(|error| error.into_response(Some(request_id)))?;
+    require_role(&ctx, &[Role::Principal, Role::Proxy])
+        .map_err(|error| error.into_response(Some(request_id)))?;
+    require_tier(&ctx, TierRequirement::Min(SensitivityTier::Amber))
+        .map_err(|error| error.into_response(Some(request_id)))?;
+    require_scope(&ctx, "write:limited").map_err(|error| error.into_response(Some(request_id)))?;
 
     let case_id =
         parse_uuid(&case_id).ok_or_else(|| invalid_request(Some(request_id), "invalid case_id"))?;
-    let principal_id = parse_uuid(&claims.sub)
+    let principal_id = parse_uuid(&ctx.principal_id)
         .ok_or_else(|| invalid_request(Some(request_id), "invalid principal_id"))?;
     let document_id = parse_uuid(&payload.document_id)
         .ok_or_else(|| invalid_request(Some(request_id), "invalid document_id"))?;
@@ -344,7 +345,7 @@ async fn attach_evidence(
 
 async fn export_case(
     State(state): State<AppState>,
-    Extension(claims): Extension<Claims>,
+    ctx: RequestContext,
     Extension(request_id): Extension<RequestId>,
     Path(case_id): Path<String>,
 ) -> Result<Json<ExportResponse>, axum::response::Response> {
@@ -352,16 +353,17 @@ async fn export_case(
         Some(pool) => pool,
         None => return Err(invalid_request(Some(request_id), "database unavailable")),
     };
-    let required = RequiredAccess {
-        min_tier: SensitivityTier::Amber,
-        access_level: AccessLevel::ReadOnlyPacks,
-        allowed_roles: Some(vec![Role::Principal, Role::Proxy, Role::ExecutorNominee]),
-    };
-    authorize(&claims, &required).map_err(|error| error.into_response(Some(request_id)))?;
+    require_role(&ctx, &[Role::Principal, Role::Proxy, Role::ExecutorNominee])
+        .map_err(|error| error.into_response(Some(request_id)))?;
+    require_tier(&ctx, TierRequirement::Min(SensitivityTier::Amber))
+        .map_err(|error| error.into_response(Some(request_id)))?;
+    require_scope_any(&ctx, &["read:packs", "read:all"])
+        .map_err(|error| error.into_response(Some(request_id)))?;
+    let include_audit = ctx.scopes.iter().any(|scope| scope == "read:all");
 
     let case_id =
         parse_uuid(&case_id).ok_or_else(|| invalid_request(Some(request_id), "invalid case_id"))?;
-    let principal_id = parse_uuid(&claims.sub)
+    let principal_id = parse_uuid(&ctx.principal_id)
         .ok_or_else(|| invalid_request(Some(request_id), "invalid principal_id"))?;
     ensure_case_access(pool, case_id, principal_id, request_id).await?;
 
@@ -460,7 +462,11 @@ async fn export_case(
 
     manifest_documents.sort_by(|a, b| a.slot_name.cmp(&b.slot_name));
 
-    let audit_events = fetch_audit_events(pool).await?;
+    let audit_events = if include_audit {
+        fetch_audit_events(pool).await?
+    } else {
+        Vec::new()
+    };
     let audit_head_hash = audit_events
         .last()
         .map(|event| event.event_hash.clone())
@@ -526,9 +532,10 @@ async fn export_case(
 
 pub fn addr_from_env(default_port: u16) -> SocketAddr {
     let host = std::env::var("HOST").unwrap_or_else(|_| "0.0.0.0".into());
-    let port = std::env::var("PORT")
+    let port = std::env::var("CASE_PORT")
         .ok()
         .and_then(|p| p.parse().ok())
+        .or_else(|| std::env::var("PORT").ok().and_then(|p| p.parse().ok()))
         .unwrap_or(default_port);
     format!("{host}:{port}").parse().expect("valid host:port")
 }

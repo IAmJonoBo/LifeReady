@@ -1,0 +1,9 @@
+[package]
+name = "lifeready-policy"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+axum.workspace = true
+lifeready-auth.workspace = true
+chrono.workspace = true

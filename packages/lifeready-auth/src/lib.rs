@@ -1,19 +1,28 @@
 use axum::{
     body::Body,
+    extract::FromRequestParts,
     http::{header, HeaderMap, HeaderValue, Request, StatusCode},
     middleware::Next,
     response::{IntoResponse, Response},
     Json,
 };
-use chrono::{Duration, Utc};
+use chrono::{Duration, TimeZone, Utc};
 use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::{
+    future::Future,
+    pin::Pin,
+    sync::Arc,
+    task::{Context, Poll},
+};
+use tower::{Layer, Service};
 use uuid::Uuid;
 
 pub const REQUEST_ID_HEADER: &str = "x-request-id";
 
 type AxumRequest = Request<Body>;
+type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -46,9 +55,15 @@ pub struct Claims {
     pub role: Role,
     pub tiers: Vec<SensitivityTier>,
     pub access_level: AccessLevel,
+    #[serde(default)]
+    pub scopes: Vec<String>,
     pub exp: usize,
     pub iat: usize,
     pub jti: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub iss: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub aud: Option<String>,
     pub email: Option<String>,
 }
 
@@ -70,17 +85,21 @@ impl Claims {
             role,
             tiers,
             access_level,
+            scopes: vec![access_level_scope(access_level).to_string()],
             exp,
             iat,
             jti: Uuid::new_v4().to_string(),
+            iss: None,
+            aud: None,
             email,
         }
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct AuthConfig {
-    secret: String,
+    encoding_key: Arc<EncodingKey>,
+    decoding_key: Arc<DecodingKey>,
     issuer: Option<String>,
     audience: Option<String>,
     leeway_seconds: u64,
@@ -88,8 +107,12 @@ pub struct AuthConfig {
 
 impl AuthConfig {
     pub fn new(secret: impl Into<String>) -> Self {
+        let secret = secret.into();
+        let encoding_key = Arc::new(EncodingKey::from_secret(secret.as_bytes()));
+        let decoding_key = Arc::new(DecodingKey::from_secret(secret.as_bytes()));
         Self {
-            secret: secret.into(),
+            encoding_key,
+            decoding_key,
             issuer: None,
             audience: None,
             leeway_seconds: 30,
@@ -97,13 +120,29 @@ impl AuthConfig {
     }
 
     pub fn from_env() -> Self {
-        match std::env::var("JWT_SECRET") {
-            Ok(secret) => Self::new(secret),
+        let secret = match std::env::var("JWT_SECRET") {
+            Ok(secret) => secret,
             Err(_) => {
                 tracing::warn!("JWT_SECRET not set; using dev-only fallback secret");
-                Self::new("dev-only-secret-change-me")
+                "dev-only-secret-change-me".to_string()
+            }
+        };
+
+        let mut config = Self::new(secret);
+
+        if let Ok(issuer) = std::env::var("JWT_ISSUER") {
+            if !issuer.trim().is_empty() {
+                config = config.with_issuer(issuer);
             }
         }
+
+        if let Ok(audience) = std::env::var("JWT_AUDIENCE") {
+            if !audience.trim().is_empty() {
+                config = config.with_audience(audience);
+            }
+        }
+
+        config
     }
 
     pub fn with_issuer(mut self, issuer: impl Into<String>) -> Self {
@@ -117,17 +156,28 @@ impl AuthConfig {
     }
 
     pub fn issue_token(&self, claims: &Claims) -> Result<String, AuthError> {
+        let mut claims = claims.clone();
+        if claims.iss.is_none() {
+            claims.iss = self.issuer.clone();
+        }
+        if claims.aud.is_none() {
+            claims.aud = self.audience.clone();
+        }
         let mut header = Header::new(Algorithm::HS256);
         header.typ = Some("JWT".into());
-        encode(
-            &header,
-            claims,
-            &EncodingKey::from_secret(self.secret.as_bytes()),
-        )
-        .map_err(|error| AuthError::invalid(format!("token encode failed: {error}")))
+        encode(&header, &claims, self.encoding_key.as_ref())
+            .map_err(|error| AuthError::invalid(format!("token encode failed: {error}")))
     }
 
     pub fn decode_token(&self, token: &str) -> Result<Claims, AuthError> {
+        let validation = self.validation();
+        let data = decode::<Claims>(token, self.decoding_key.as_ref(), &validation)
+            .map_err(|error| AuthError::unauthorized(format!("token decode failed: {error}")))?;
+
+        Ok(data.claims)
+    }
+
+    fn validation(&self) -> Validation {
         let mut validation = Validation::new(Algorithm::HS256);
         validation.leeway = self.leeway_seconds;
 
@@ -138,14 +188,7 @@ impl AuthConfig {
             validation.set_audience(&[audience]);
         }
 
-        let data = decode::<Claims>(
-            token,
-            &DecodingKey::from_secret(self.secret.as_bytes()),
-            &validation,
-        )
-        .map_err(|error| AuthError::unauthorized(format!("token decode failed: {error}")))?;
-
-        Ok(data.claims)
+        validation
     }
 }
 
@@ -170,49 +213,112 @@ pub struct RequiredAccess {
 }
 
 #[derive(Debug, Clone)]
-pub struct AuthError {
-    status: StatusCode,
-    title: String,
-    detail: Option<String>,
-    r#type: String,
+pub struct RequestContext {
+    pub request_id: RequestId,
+    pub principal_id: String,
+    pub roles: Vec<Role>,
+    pub allowed_tiers: Vec<SensitivityTier>,
+    pub scopes: Vec<String>,
+    pub expires_at: chrono::DateTime<Utc>,
+    pub email: Option<String>,
+}
+
+impl RequestContext {
+    fn from_claims(request_id: RequestId, claims: &Claims) -> Self {
+        let scopes = if claims.scopes.is_empty() {
+            vec![access_level_scope(claims.access_level).to_string()]
+        } else {
+            claims.scopes.clone()
+        };
+
+        let expires_at = Utc
+            .timestamp_opt(claims.exp as i64, 0)
+            .single()
+            .unwrap_or_else(Utc::now);
+
+        Self {
+            request_id,
+            principal_id: claims.sub.clone(),
+            roles: vec![claims.role],
+            allowed_tiers: claims.tiers.clone(),
+            scopes,
+            expires_at,
+            email: claims.email.clone(),
+        }
+    }
+}
+
+pub fn ctx<B>(req: &Request<B>) -> Option<&RequestContext> {
+    req.extensions().get::<RequestContext>()
+}
+
+impl<S> FromRequestParts<S> for RequestContext
+where
+    S: Send + Sync,
+{
+    type Rejection = AuthError;
+
+    async fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        _state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        parts
+            .extensions
+            .get::<RequestContext>()
+            .cloned()
+            .ok_or_else(|| AuthError::unauthorized("missing auth context"))
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum AuthError {
+    Unauthorized { detail: String },
+    Forbidden { detail: String },
+    Invalid { detail: String },
 }
 
 impl AuthError {
     pub fn unauthorized(detail: impl Into<String>) -> Self {
-        Self {
-            status: StatusCode::UNAUTHORIZED,
-            title: "Unauthorized".into(),
-            detail: Some(detail.into()),
-            r#type: "https://errors.lifeready.local/auth/unauthorized".into(),
+        Self::Unauthorized {
+            detail: detail.into(),
         }
     }
 
     pub fn forbidden(detail: impl Into<String>) -> Self {
-        Self {
-            status: StatusCode::FORBIDDEN,
-            title: "Forbidden".into(),
-            detail: Some(detail.into()),
-            r#type: "https://errors.lifeready.local/auth/forbidden".into(),
+        Self::Forbidden {
+            detail: detail.into(),
         }
     }
 
     pub fn invalid(detail: impl Into<String>) -> Self {
-        Self {
-            status: StatusCode::BAD_REQUEST,
-            title: "Invalid request".into(),
-            detail: Some(detail.into()),
-            r#type: "https://errors.lifeready.local/request/invalid".into(),
+        Self::Invalid {
+            detail: detail.into(),
         }
     }
 
     pub fn into_response(self, request_id: Option<RequestId>) -> Response {
-        problem_response(
-            self.status,
-            &self.r#type,
-            &self.title,
-            self.detail,
-            request_id.map(|id| id.0),
-        )
+        let (status, title, r#type, detail) = match self {
+            AuthError::Unauthorized { detail } => (
+                StatusCode::UNAUTHORIZED,
+                "Unauthorized",
+                "https://errors.lifeready.local/auth/unauthorized",
+                Some(detail),
+            ),
+            AuthError::Forbidden { detail } => (
+                StatusCode::FORBIDDEN,
+                "Forbidden",
+                "https://errors.lifeready.local/auth/forbidden",
+                Some(detail),
+            ),
+            AuthError::Invalid { detail } => (
+                StatusCode::BAD_REQUEST,
+                "Invalid request",
+                "https://errors.lifeready.local/request/invalid",
+                Some(detail),
+            ),
+        };
+
+        problem_response(status, r#type, title, detail, request_id.map(|id| id.0))
     }
 }
 
@@ -269,6 +375,14 @@ fn access_rank(level: AccessLevel) -> u8 {
     }
 }
 
+fn access_level_scope(level: AccessLevel) -> &'static str {
+    match level {
+        AccessLevel::ReadOnlyPacks => "read:packs",
+        AccessLevel::ReadOnlyAll => "read:all",
+        AccessLevel::LimitedWrite => "write:limited",
+    }
+}
+
 pub fn authorize(claims: &Claims, required: &RequiredAccess) -> Result<(), AuthError> {
     if let Some(roles) = &required.allowed_roles {
         if !roles.contains(&claims.role) {
@@ -310,6 +424,99 @@ impl AuthLayerState {
     }
 }
 
+#[derive(Clone)]
+pub struct AuthLayer {
+    config: Arc<AuthConfig>,
+    allowlist: Arc<Vec<String>>,
+}
+
+impl AuthLayer {
+    pub fn new(config: Arc<AuthConfig>) -> Self {
+        Self {
+            config,
+            allowlist: Arc::new(Vec::new()),
+        }
+    }
+
+    pub fn with_allowlist(
+        mut self,
+        allowlist: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        self.allowlist = Arc::new(allowlist.into_iter().map(Into::into).collect());
+        self
+    }
+}
+
+impl<S> Layer<S> for AuthLayer {
+    type Service = AuthService<S>;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        AuthService {
+            inner,
+            config: self.config.clone(),
+            allowlist: self.allowlist.clone(),
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct AuthService<S> {
+    inner: S,
+    config: Arc<AuthConfig>,
+    allowlist: Arc<Vec<String>>,
+}
+
+impl<S, B> Service<Request<B>> for AuthService<S>
+where
+    S: Service<Request<B>, Response = Response> + Clone + Send + 'static,
+    S::Future: Send + 'static,
+    B: Send + 'static,
+{
+    type Response = Response;
+    type Error = S::Error;
+    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, mut req: Request<B>) -> Self::Future {
+        let config = self.config.clone();
+        let allowlist = self.allowlist.clone();
+        let mut inner = self.inner.clone();
+
+        Box::pin(async move {
+            let path = req.uri().path();
+            if path == "/healthz" || allowlist.iter().any(|allowed| allowed == path) {
+                return inner.call(req).await;
+            }
+
+            let request_id = req
+                .extensions()
+                .get::<RequestId>()
+                .copied()
+                .unwrap_or_else(|| RequestId(Uuid::new_v4()));
+            req.extensions_mut().insert(request_id);
+
+            let token = match bearer_token(req.headers()) {
+                Ok(token) => token,
+                Err(error) => return Ok(error.into_response(Some(request_id))),
+            };
+
+            let claims = match config.decode_token(token) {
+                Ok(claims) => claims,
+                Err(error) => return Ok(error.into_response(Some(request_id))),
+            };
+
+            let ctx = RequestContext::from_claims(request_id, &claims);
+            req.extensions_mut().insert(claims);
+            req.extensions_mut().insert(ctx);
+
+            inner.call(req).await
+        })
+    }
+}
+
 pub async fn request_id_middleware(mut req: AxumRequest, next: Next) -> Response {
     let request_id =
         RequestId::from_headers(req.headers()).unwrap_or_else(|| RequestId(Uuid::new_v4()));
@@ -334,18 +541,25 @@ pub async fn auth_middleware(
         return next.run(req).await;
     }
 
-    let request_id = req.extensions().get::<RequestId>().copied();
+    let request_id = req
+        .extensions()
+        .get::<RequestId>()
+        .copied()
+        .unwrap_or_else(|| RequestId(Uuid::new_v4()));
+    req.extensions_mut().insert(request_id);
     let token = match bearer_token(req.headers()) {
         Ok(token) => token,
-        Err(error) => return error.into_response(request_id),
+        Err(error) => return error.into_response(Some(request_id)),
     };
 
     let claims = match state.config.decode_token(token) {
         Ok(claims) => claims,
-        Err(error) => return error.into_response(request_id),
+        Err(error) => return error.into_response(Some(request_id)),
     };
 
+    let ctx = RequestContext::from_claims(request_id, &claims);
     req.extensions_mut().insert(claims);
+    req.extensions_mut().insert(ctx);
     next.run(req).await
 }
 
@@ -375,23 +589,23 @@ pub fn invalid_request(request_id: Option<RequestId>, detail: impl Into<String>)
 }
 
 pub fn not_found(request_id: Option<RequestId>, detail: impl Into<String>) -> Response {
-    AuthError {
-        status: StatusCode::NOT_FOUND,
-        title: "Not found".into(),
-        detail: Some(detail.into()),
-        r#type: "https://errors.lifeready.local/request/not-found".into(),
-    }
-    .into_response(request_id)
+    problem_response(
+        StatusCode::NOT_FOUND,
+        "https://errors.lifeready.local/request/not-found",
+        "Not found",
+        Some(detail.into()),
+        request_id.map(|id| id.0),
+    )
 }
 
 pub fn conflict(request_id: Option<RequestId>, detail: impl Into<String>) -> Response {
-    AuthError {
-        status: StatusCode::CONFLICT,
-        title: "Conflict".into(),
-        detail: Some(detail.into()),
-        r#type: "https://errors.lifeready.local/request/conflict".into(),
-    }
-    .into_response(request_id)
+    problem_response(
+        StatusCode::CONFLICT,
+        "https://errors.lifeready.local/request/conflict",
+        "Conflict",
+        Some(detail.into()),
+        request_id.map(|id| id.0),
+    )
 }
 
 pub fn ok_response<T: Serialize>(payload: T) -> Response {
@@ -438,5 +652,45 @@ mod tests {
         };
         let result = authorize(&claims, &required);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn decode_token_roundtrip() {
+        let config = AuthConfig::new("test-secret");
+        let claims = Claims::new(
+            "user",
+            Role::Principal,
+            vec![SensitivityTier::Green],
+            AccessLevel::ReadOnlyAll,
+            None,
+            60,
+        );
+
+        let token = config.issue_token(&claims).expect("token");
+        let decoded = config.decode_token(&token).expect("decoded");
+
+        assert_eq!(decoded.sub, claims.sub);
+        assert_eq!(decoded.role, claims.role);
+        assert_eq!(decoded.access_level, claims.access_level);
+    }
+
+    #[test]
+    fn decode_token_rejects_expired() {
+        let config = AuthConfig::new("test-secret");
+        let claims = Claims::new(
+            "user",
+            Role::Principal,
+            vec![SensitivityTier::Green],
+            AccessLevel::ReadOnlyAll,
+            None,
+            -120,
+        );
+        let token = config.issue_token(&claims).expect("token");
+
+        let err = config.decode_token(&token).expect_err("expired");
+        match err {
+            AuthError::Unauthorized { .. } => {}
+            other => panic!("unexpected error: {other:?}"),
+        }
     }
 }

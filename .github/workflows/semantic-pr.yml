@@ -3,6 +3,10 @@ name: semantic-pr
 on:
   pull_request_target:
 
+permissions:
+  contents: read
+  pull-requests: read
+
 jobs:
   lint:
     runs-on: ubuntu-latest

@@ -56,7 +56,7 @@ for spec in "${files[@]}"; do
 
 	base="$(basename "${spec_path}")"
 	svc="${base%.openapi.yaml}"
-	spec_rel="${spec_path#${REPO_ROOT}/}"
+	spec_rel="${spec_path#"${REPO_ROOT}/"}"
 	spec_arg="${ROOT_FROM_TOOLS}/${spec_rel}"
 
 	# Optional service filter: SERVICE should match directory name or spec stem.

@@ -101,6 +101,7 @@ dependencies = [
  "hex",
  "http-body-util",
  "lifeready-auth",
+ "lifeready-policy",
  "serde",
  "serde_json",
  "sha2",
@@ -243,6 +244,7 @@ dependencies = [
  "http-body-util",
  "lifeready-audit",
  "lifeready-auth",
+ "lifeready-policy",
  "serde",
  "serde_json",
  "sha2",
@@ -488,6 +490,7 @@ dependencies = [
  "http-body-util",
  "lifeready-audit",
  "lifeready-auth",
+ "lifeready-policy",
  "serde",
  "serde_json",
  "sqlx",
@@ -928,6 +931,7 @@ dependencies = [
  "http-body-util",
  "lifeready-audit",
  "lifeready-auth",
+ "lifeready-policy",
  "serde",
  "serde_json",
  "sqlx",
@@ -1072,6 +1076,15 @@ dependencies = [
  "tower",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "lifeready-policy"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "chrono",
+ "lifeready-auth",
 ]
 
 [[package]]
@@ -2269,6 +2282,7 @@ dependencies = [
  "http-body-util",
  "lifeready-audit",
  "lifeready-auth",
+ "lifeready-policy",
  "serde",
  "serde_json",
  "sqlx",

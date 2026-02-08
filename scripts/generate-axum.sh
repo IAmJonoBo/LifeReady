@@ -17,7 +17,7 @@ TOOLS_DIR="${REPO_ROOT}/tools/openapi"
 CONFIG_FILE="${OPENAPI_GENERATOR_CONFIG:-${REPO_ROOT}/packages/contracts/openapi-generator.base.yaml}"
 OPENAPI_CLI="${TOOLS_DIR}/node_modules/.bin/openapi-generator-cli"
 ROOT_FROM_TOOLS="../.."
-CONFIG_REL="${CONFIG_FILE#${REPO_ROOT}/}"
+CONFIG_REL="${CONFIG_FILE#"${REPO_ROOT}/"}"
 CONFIG_ARG="${ROOT_FROM_TOOLS}/${CONFIG_REL}"
 
 if [[ -z ${SPECS} ]]; then
@@ -65,6 +65,11 @@ for spec in "${files[@]}"; do
 	base="$(basename "${spec_path}")"
 	svc="${base%.openapi.yaml}"
 
+	if [[ ${svc} == "common" ]]; then
+		echo " - skipping common spec: ${spec_path}"
+		continue
+	fi
+
 	if [[ -n ${SERVICE_FILTER} && ${svc} != "${SERVICE_FILTER}" ]]; then
 		continue
 	fi
@@ -83,7 +88,7 @@ for spec in "${files[@]}"; do
 	# You can later add a config file per service if you want custom templates/package naming.
 	(cd "${TOOLS_DIR}" && "${OPENAPI_CLI}" generate \
 		-g rust-axum \
-		-i "${ROOT_FROM_TOOLS}/${spec_path#${REPO_ROOT}/}" \
+		-i "${ROOT_FROM_TOOLS}/${spec_path#"${REPO_ROOT}/"}" \
 		-o "${out_arg}" \
 		-c "${CONFIG_ARG}" \
 		--additional-properties=packageName="${svc//-/_}",crateName="${svc//-/_}")

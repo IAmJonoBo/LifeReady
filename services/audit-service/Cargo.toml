@@ -17,6 +17,7 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 uuid.workspace = true
 lifeready-auth.workspace = true
+lifeready-policy.workspace = true
 
 [dev-dependencies]
 bytes = "1"

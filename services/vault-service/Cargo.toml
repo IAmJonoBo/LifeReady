@@ -16,6 +16,7 @@ uuid.workspace = true
 sqlx.workspace = true
 chrono.workspace = true
 lifeready-auth.workspace = true
+lifeready-policy.workspace = true
 lifeready-audit.workspace = true
 
 [dev-dependencies]

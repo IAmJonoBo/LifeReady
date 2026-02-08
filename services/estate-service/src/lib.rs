@@ -6,12 +6,13 @@ use axum::{
 };
 use chrono::Utc;
 use lifeready_audit::{AuditEvent, InMemoryAuditSink};
-use lifeready_auth::{
-    auth_middleware, authorize, request_id_middleware, AccessLevel, AuthConfig, AuthLayerState,
-    Claims, RequestId, RequiredAccess, Role, SensitivityTier,
+use lifeready_auth::{request_id_middleware, AuthConfig, AuthLayer, RequestContext, RequestId};
+use lifeready_policy::{
+    require_role, require_scope, require_tier, Role, SensitivityTier, TierRequirement,
 };
 use serde::{Deserialize, Serialize};
-use std::{net::SocketAddr, time::Duration};
+use std::net::SocketAddr;
+use std::sync::Arc;
 
 #[derive(Clone)]
 struct AppState {
@@ -22,6 +23,7 @@ pub fn router() -> Router {
     let state = AppState {
         audit: InMemoryAuditSink::default(),
     };
+    let auth_config = Arc::new(AuthConfig::from_env());
 
     Router::new()
         .route("/healthz", get(healthz))
@@ -30,10 +32,7 @@ pub fn router() -> Router {
         .route("/v1/instructions", post(create_instruction))
         .route("/v1/roles/grants", post(create_role_grant))
         .with_state(state)
-        .layer(axum::middleware::from_fn_with_state(
-            AuthLayerState::new(AuthConfig::from_env(), Vec::<&'static str>::new()),
-            auth_middleware,
-        ))
+        .layer(AuthLayer::new(auth_config))
         .layer(axum::middleware::from_fn(request_id_middleware))
 }
 
@@ -129,16 +128,15 @@ struct RoleGrantResponse {
 
 async fn create_person(
     State(state): State<AppState>,
-    Extension(claims): Extension<Claims>,
+    ctx: RequestContext,
     Extension(request_id): Extension<RequestId>,
     Json(payload): Json<PersonCreate>,
 ) -> Result<(StatusCode, Json<PersonResponse>), axum::response::Response> {
-    let required = RequiredAccess {
-        min_tier: SensitivityTier::Amber,
-        access_level: AccessLevel::LimitedWrite,
-        allowed_roles: Some(vec![Role::Principal, Role::Proxy]),
-    };
-    authorize(&claims, &required).map_err(|error| error.into_response(Some(request_id)))?;
+    require_role(&ctx, &[Role::Principal, Role::Proxy])
+        .map_err(|error| error.into_response(Some(request_id)))?;
+    require_tier(&ctx, TierRequirement::Min(SensitivityTier::Amber))
+        .map_err(|error| error.into_response(Some(request_id)))?;
+    require_scope(&ctx, "write:limited").map_err(|error| error.into_response(Some(request_id)))?;
 
     let response = PersonResponse {
         person_id: uuid::Uuid::new_v4().to_string(),
@@ -150,7 +148,7 @@ async fn create_person(
     };
 
     state.audit.record(AuditEvent::new(
-        claims.sub.clone(),
+        ctx.principal_id.clone(),
         "estate.person.created",
         "amber",
         Some(request_id.0),
@@ -162,16 +160,15 @@ async fn create_person(
 }
 
 async fn list_people(
-    Extension(claims): Extension<Claims>,
+    ctx: RequestContext,
     Extension(request_id): Extension<RequestId>,
     Query(query): Query<PeopleQuery>,
 ) -> Result<Json<PeopleListResponse>, axum::response::Response> {
-    let required = RequiredAccess {
-        min_tier: SensitivityTier::Amber,
-        access_level: AccessLevel::ReadOnlyAll,
-        allowed_roles: Some(vec![Role::Principal, Role::Proxy, Role::ExecutorNominee]),
-    };
-    authorize(&claims, &required).map_err(|error| error.into_response(Some(request_id)))?;
+    require_role(&ctx, &[Role::Principal, Role::Proxy, Role::ExecutorNominee])
+        .map_err(|error| error.into_response(Some(request_id)))?;
+    require_tier(&ctx, TierRequirement::Min(SensitivityTier::Amber))
+        .map_err(|error| error.into_response(Some(request_id)))?;
+    require_scope(&ctx, "read:all").map_err(|error| error.into_response(Some(request_id)))?;
 
     let _limit = query.limit.unwrap_or(50);
     Ok(Json(PeopleListResponse { items: Vec::new() }))
@@ -179,17 +176,16 @@ async fn list_people(
 
 async fn create_asset(
     State(state): State<AppState>,
-    Extension(claims): Extension<Claims>,
+    ctx: RequestContext,
     Extension(request_id): Extension<RequestId>,
     Json(payload): Json<AssetCreate>,
 ) -> Result<(StatusCode, Json<AssetResponse>), axum::response::Response> {
     let tier = payload.sensitivity.unwrap_or(SensitivityTier::Amber);
-    let required = RequiredAccess {
-        min_tier: tier,
-        access_level: AccessLevel::LimitedWrite,
-        allowed_roles: Some(vec![Role::Principal, Role::Proxy]),
-    };
-    authorize(&claims, &required).map_err(|error| error.into_response(Some(request_id)))?;
+    require_role(&ctx, &[Role::Principal, Role::Proxy])
+        .map_err(|error| error.into_response(Some(request_id)))?;
+    require_tier(&ctx, TierRequirement::Allowlist(vec![tier]))
+        .map_err(|error| error.into_response(Some(request_id)))?;
+    require_scope(&ctx, "write:limited").map_err(|error| error.into_response(Some(request_id)))?;
 
     let response = AssetResponse {
         asset_id: uuid::Uuid::new_v4().to_string(),
@@ -201,7 +197,7 @@ async fn create_asset(
     };
 
     state.audit.record(AuditEvent::new(
-        claims.sub.clone(),
+        ctx.principal_id.clone(),
         "estate.asset.created",
         format!("{:?}", tier).to_lowercase(),
         Some(request_id.0),
@@ -214,17 +210,16 @@ async fn create_asset(
 
 async fn create_instruction(
     State(state): State<AppState>,
-    Extension(claims): Extension<Claims>,
+    ctx: RequestContext,
     Extension(request_id): Extension<RequestId>,
     Json(payload): Json<InstructionCreate>,
 ) -> Result<(StatusCode, Json<InstructionResponse>), axum::response::Response> {
     let tier = payload.sensitivity.unwrap_or(SensitivityTier::Amber);
-    let required = RequiredAccess {
-        min_tier: tier,
-        access_level: AccessLevel::LimitedWrite,
-        allowed_roles: Some(vec![Role::Principal, Role::Proxy]),
-    };
-    authorize(&claims, &required).map_err(|error| error.into_response(Some(request_id)))?;
+    require_role(&ctx, &[Role::Principal, Role::Proxy])
+        .map_err(|error| error.into_response(Some(request_id)))?;
+    require_tier(&ctx, TierRequirement::Allowlist(vec![tier]))
+        .map_err(|error| error.into_response(Some(request_id)))?;
+    require_scope(&ctx, "write:limited").map_err(|error| error.into_response(Some(request_id)))?;
 
     let response = InstructionResponse {
         instruction_id: uuid::Uuid::new_v4().to_string(),
@@ -235,7 +230,7 @@ async fn create_instruction(
     };
 
     state.audit.record(AuditEvent::new(
-        claims.sub.clone(),
+        ctx.principal_id.clone(),
         "estate.instruction.created",
         format!("{:?}", tier).to_lowercase(),
         Some(request_id.0),
@@ -248,16 +243,15 @@ async fn create_instruction(
 
 async fn create_role_grant(
     State(state): State<AppState>,
-    Extension(claims): Extension<Claims>,
+    ctx: RequestContext,
     Extension(request_id): Extension<RequestId>,
     Json(payload): Json<RoleGrantCreate>,
 ) -> Result<(StatusCode, Json<RoleGrantResponse>), axum::response::Response> {
-    let required = RequiredAccess {
-        min_tier: SensitivityTier::Amber,
-        access_level: AccessLevel::LimitedWrite,
-        allowed_roles: Some(vec![Role::Principal]),
-    };
-    authorize(&claims, &required).map_err(|error| error.into_response(Some(request_id)))?;
+    require_role(&ctx, &[Role::Principal])
+        .map_err(|error| error.into_response(Some(request_id)))?;
+    require_tier(&ctx, TierRequirement::Min(SensitivityTier::Amber))
+        .map_err(|error| error.into_response(Some(request_id)))?;
+    require_scope(&ctx, "write:limited").map_err(|error| error.into_response(Some(request_id)))?;
 
     let response = RoleGrantResponse {
         grant_id: uuid::Uuid::new_v4().to_string(),
@@ -269,7 +263,7 @@ async fn create_role_grant(
     };
 
     state.audit.record(AuditEvent::new(
-        claims.sub.clone(),
+        ctx.principal_id.clone(),
         "estate.role.grant_invited",
         "amber",
         Some(request_id.0),
@@ -282,9 +276,10 @@ async fn create_role_grant(
 
 pub fn addr_from_env(default_port: u16) -> SocketAddr {
     let host = std::env::var("HOST").unwrap_or_else(|_| "0.0.0.0".into());
-    let port = std::env::var("PORT")
+    let port = std::env::var("ESTATE_PORT")
         .ok()
         .and_then(|p| p.parse().ok())
+        .or_else(|| std::env::var("PORT").ok().and_then(|p| p.parse().ok()))
         .unwrap_or(default_port);
     format!("{host}:{port}").parse().expect("valid host:port")
 }

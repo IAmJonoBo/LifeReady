@@ -6,13 +6,16 @@ use axum::{
 };
 use chrono::Utc;
 use lifeready_auth::{
-    auth_middleware, authorize, conflict, invalid_request, not_found, request_id_middleware,
-    AccessLevel, AuthConfig, AuthLayerState, Claims, RequestId, RequiredAccess, Role,
-    SensitivityTier,
+    conflict, invalid_request, not_found, request_id_middleware, AuthConfig, AuthLayer,
+    RequestContext, RequestId,
+};
+use lifeready_policy::{
+    require_role, require_scope, require_tier, Role, SensitivityTier, TierRequirement,
 };
 use serde::{Deserialize, Serialize};
 use sqlx::{PgPool, Row};
-use std::{net::SocketAddr, time::Duration};
+use std::net::SocketAddr;
+use std::sync::Arc;
 use std::{path::PathBuf, str::FromStr};
 
 #[derive(Clone)]
@@ -26,6 +29,7 @@ pub fn router() -> Router {
         pool: pool_from_env(),
         storage_dir: storage_dir_from_env(),
     };
+    let auth_config = Arc::new(AuthConfig::from_env());
 
     Router::new()
         .route("/healthz", get(healthz))
@@ -37,10 +41,7 @@ pub fn router() -> Router {
         )
         .route("/v1/documents/{document_id}", get(get_document))
         .with_state(state)
-        .layer(axum::middleware::from_fn_with_state(
-            AuthLayerState::new(AuthConfig::from_env(), Vec::<&'static str>::new()),
-            auth_middleware,
-        ))
+        .layer(AuthLayer::new(auth_config))
         .layer(axum::middleware::from_fn(request_id_middleware))
 }
 
@@ -101,7 +102,7 @@ struct DocumentListResponse {
 
 async fn init_document(
     State(state): State<AppState>,
-    Extension(claims): Extension<Claims>,
+    ctx: RequestContext,
     Extension(request_id): Extension<RequestId>,
     Json(payload): Json<DocumentInit>,
 ) -> Result<(StatusCode, Json<DocumentInitResponse>), axum::response::Response> {
@@ -109,14 +110,13 @@ async fn init_document(
         Some(pool) => pool,
         None => return Err(invalid_request(Some(request_id), "database unavailable")),
     };
-    let required = RequiredAccess {
-        min_tier: payload.sensitivity,
-        access_level: AccessLevel::LimitedWrite,
-        allowed_roles: Some(vec![Role::Principal, Role::Proxy]),
-    };
-    authorize(&claims, &required).map_err(|error| error.into_response(Some(request_id)))?;
+    require_role(&ctx, &[Role::Principal, Role::Proxy])
+        .map_err(|error| error.into_response(Some(request_id)))?;
+    require_tier(&ctx, TierRequirement::Allowlist(vec![payload.sensitivity]))
+        .map_err(|error| error.into_response(Some(request_id)))?;
+    require_scope(&ctx, "write:limited").map_err(|error| error.into_response(Some(request_id)))?;
 
-    let principal_id = parse_uuid(&claims.sub)
+    let principal_id = parse_uuid(&ctx.principal_id)
         .ok_or_else(|| invalid_request(Some(request_id), "invalid principal_id"))?;
     let document_type = payload.document_type.to_lowercase();
 
@@ -157,7 +157,7 @@ async fn init_document(
 
 async fn commit_document(
     State(state): State<AppState>,
-    Extension(claims): Extension<Claims>,
+    ctx: RequestContext,
     Extension(request_id): Extension<RequestId>,
     Path(document_id): Path<String>,
     Json(payload): Json<DocumentCommit>,
@@ -166,12 +166,11 @@ async fn commit_document(
         Some(pool) => pool,
         None => return Err(invalid_request(Some(request_id), "database unavailable")),
     };
-    let required = RequiredAccess {
-        min_tier: SensitivityTier::Amber,
-        access_level: AccessLevel::LimitedWrite,
-        allowed_roles: Some(vec![Role::Principal, Role::Proxy]),
-    };
-    authorize(&claims, &required).map_err(|error| error.into_response(Some(request_id)))?;
+    require_role(&ctx, &[Role::Principal, Role::Proxy])
+        .map_err(|error| error.into_response(Some(request_id)))?;
+    require_tier(&ctx, TierRequirement::Min(SensitivityTier::Amber))
+        .map_err(|error| error.into_response(Some(request_id)))?;
+    require_scope(&ctx, "write:limited").map_err(|error| error.into_response(Some(request_id)))?;
 
     if !is_sha256(&payload.sha256) {
         return Err(invalid_request(Some(request_id), "invalid sha256"));
@@ -179,7 +178,7 @@ async fn commit_document(
 
     let document_id = parse_uuid(&document_id)
         .ok_or_else(|| invalid_request(Some(request_id), "invalid document_id"))?;
-    let principal_id = parse_uuid(&claims.sub)
+    let principal_id = parse_uuid(&ctx.principal_id)
         .ok_or_else(|| invalid_request(Some(request_id), "invalid principal_id"))?;
 
     let exists =
@@ -232,7 +231,7 @@ async fn commit_document(
 
 async fn get_document(
     State(state): State<AppState>,
-    Extension(claims): Extension<Claims>,
+    ctx: RequestContext,
     Extension(request_id): Extension<RequestId>,
     Path(document_id): Path<String>,
 ) -> Result<Json<DocumentResponse>, axum::response::Response> {
@@ -240,16 +239,15 @@ async fn get_document(
         Some(pool) => pool,
         None => return Err(invalid_request(Some(request_id), "database unavailable")),
     };
-    let required = RequiredAccess {
-        min_tier: SensitivityTier::Amber,
-        access_level: AccessLevel::ReadOnlyAll,
-        allowed_roles: Some(vec![Role::Principal, Role::Proxy, Role::ExecutorNominee]),
-    };
-    authorize(&claims, &required).map_err(|error| error.into_response(Some(request_id)))?;
+    require_role(&ctx, &[Role::Principal, Role::Proxy, Role::ExecutorNominee])
+        .map_err(|error| error.into_response(Some(request_id)))?;
+    require_tier(&ctx, TierRequirement::Min(SensitivityTier::Amber))
+        .map_err(|error| error.into_response(Some(request_id)))?;
+    require_scope(&ctx, "read:all").map_err(|error| error.into_response(Some(request_id)))?;
 
     let document_id = parse_uuid(&document_id)
         .ok_or_else(|| invalid_request(Some(request_id), "invalid document_id"))?;
-    let principal_id = parse_uuid(&claims.sub)
+    let principal_id = parse_uuid(&ctx.principal_id)
         .ok_or_else(|| invalid_request(Some(request_id), "invalid principal_id"))?;
 
     let row = sqlx::query(
@@ -276,6 +274,8 @@ async fn get_document(
     )
     .ok_or_else(|| invalid_request(Some(request_id), "invalid sensitivity"))?;
 
+    ensure_document_access(&ctx, sensitivity, request_id)?;
+
     Ok(Json(DocumentResponse {
         document_id: row
             .try_get::<uuid::Uuid, _>("document_id")
@@ -297,7 +297,7 @@ async fn get_document(
 
 async fn list_documents(
     State(state): State<AppState>,
-    Extension(claims): Extension<Claims>,
+    ctx: RequestContext,
     Extension(request_id): Extension<RequestId>,
     Query(query): Query<ListQuery>,
 ) -> Result<Json<DocumentListResponse>, axum::response::Response> {
@@ -305,14 +305,13 @@ async fn list_documents(
         Some(pool) => pool,
         None => return Err(invalid_request(Some(request_id), "database unavailable")),
     };
-    let required = RequiredAccess {
-        min_tier: SensitivityTier::Amber,
-        access_level: AccessLevel::ReadOnlyAll,
-        allowed_roles: Some(vec![Role::Principal, Role::Proxy, Role::ExecutorNominee]),
-    };
-    authorize(&claims, &required).map_err(|error| error.into_response(Some(request_id)))?;
+    require_role(&ctx, &[Role::Principal, Role::Proxy, Role::ExecutorNominee])
+        .map_err(|error| error.into_response(Some(request_id)))?;
+    require_tier(&ctx, TierRequirement::Min(SensitivityTier::Amber))
+        .map_err(|error| error.into_response(Some(request_id)))?;
+    require_scope(&ctx, "read:all").map_err(|error| error.into_response(Some(request_id)))?;
 
-    let principal_id = parse_uuid(&claims.sub)
+    let principal_id = parse_uuid(&ctx.principal_id)
         .ok_or_else(|| invalid_request(Some(request_id), "invalid principal_id"))?;
     let limit = query.limit.unwrap_or(50).clamp(1, 200);
 
@@ -336,6 +335,10 @@ async fn list_documents(
                 .map_err(|error| db_error_to_response(error.into(), request_id))?,
         )
         .ok_or_else(|| invalid_request(Some(request_id), "invalid sensitivity"))?;
+
+        if ensure_document_access(&ctx, sensitivity, request_id).is_err() {
+            continue;
+        }
 
         items.push(DocumentResponse {
             document_id: row
@@ -361,9 +364,10 @@ async fn list_documents(
 
 pub fn addr_from_env(default_port: u16) -> SocketAddr {
     let host = std::env::var("HOST").unwrap_or_else(|_| "0.0.0.0".into());
-    let port = std::env::var("PORT")
+    let port = std::env::var("VAULT_PORT")
         .ok()
         .and_then(|p| p.parse().ok())
+        .or_else(|| std::env::var("PORT").ok().and_then(|p| p.parse().ok()))
         .unwrap_or(default_port);
     format!("{host}:{port}").parse().expect("valid host:port")
 }
@@ -428,6 +432,15 @@ fn tier_from_db(value: String) -> Option<SensitivityTier> {
         "red" => Some(SensitivityTier::Red),
         _ => None,
     }
+}
+
+pub fn ensure_document_access(
+    ctx: &RequestContext,
+    sensitivity: SensitivityTier,
+    request_id: RequestId,
+) -> Result<(), axum::response::Response> {
+    require_tier(ctx, TierRequirement::Allowlist(vec![sensitivity]))
+        .map_err(|error| error.into_response(Some(request_id)))
 }
 
 fn is_sha256(value: &str) -> bool {

@@ -8,6 +8,7 @@ members = [
   "services/case-service",
   "packages/audit-verifier",
   "packages/lifeready-auth",
+  "packages/lifeready-policy",
   "packages/lifeready-audit",
 ]
 
@@ -31,6 +32,7 @@ tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
 jsonwebtoken = "9.3.1"
 
 lifeready-auth = { path = "packages/lifeready-auth" }
+lifeready-policy = { path = "packages/lifeready-policy" }
 lifeready-audit = { path = "packages/lifeready-audit" }
 
 sqlx = { version = "0.8.6", features = [

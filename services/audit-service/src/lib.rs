@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use axum::{
     extract::{Extension, State},
     http::StatusCode,
@@ -8,14 +6,18 @@ use axum::{
 };
 use chrono::Utc;
 use lifeready_auth::{
-    auth_middleware, authorize, conflict, invalid_request, request_id_middleware, AccessLevel,
-    AuthConfig, AuthLayerState, Claims, RequestId, RequiredAccess, SensitivityTier,
+    conflict, invalid_request, request_id_middleware, AuthConfig, AuthLayer, RequestContext,
+    RequestId,
+};
+use lifeready_policy::{
+    require_role, require_scope, require_tier, Role, SensitivityTier, TierRequirement,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 use sqlx::{PgPool, Row};
 use std::net::SocketAddr;
+use std::sync::Arc;
 use std::{fs, path::PathBuf};
 use uuid::Uuid;
 
@@ -61,15 +63,13 @@ pub fn app() -> Router {
         pool: pool_from_env(),
         export_dir: export_dir_from_env(),
     };
+    let auth_config = Arc::new(AuthConfig::from_env());
     Router::new()
         .route("/healthz", get(healthz))
         .route("/v1/audit/events", post(append_audit_event))
         .route("/v1/audit/export", get(export_audit))
         .with_state(state)
-        .layer(axum::middleware::from_fn_with_state(
-            AuthLayerState::new(AuthConfig::from_env(), Vec::<&'static str>::new()),
-            auth_middleware,
-        ))
+        .layer(AuthLayer::new(auth_config))
         .layer(axum::middleware::from_fn(request_id_middleware))
 }
 
@@ -79,9 +79,10 @@ async fn healthz() -> &'static str {
 
 pub fn addr_from_env(default_port: u16) -> SocketAddr {
     let host = std::env::var("HOST").unwrap_or_else(|_| "0.0.0.0".into());
-    let port = std::env::var("PORT")
+    let port = std::env::var("AUDIT_PORT")
         .ok()
         .and_then(|p| p.parse().ok())
+        .or_else(|| std::env::var("PORT").ok().and_then(|p| p.parse().ok()))
         .unwrap_or(default_port);
     format!("{host}:{port}").parse().expect("valid host:port")
 }
@@ -162,7 +163,7 @@ pub fn zero_hash() -> String {
 
 async fn append_audit_event(
     State(state): State<AppState>,
-    Extension(claims): Extension<Claims>,
+    ctx: RequestContext,
     Extension(request_id): Extension<RequestId>,
     Json(input): Json<AuditAppend>,
 ) -> Result<(StatusCode, Json<AuditEventResponse>), axum::response::Response> {
@@ -176,12 +177,11 @@ async fn append_audit_event(
         "red" => SensitivityTier::Red,
         _ => return Err(invalid_request(Some(request_id), "invalid tier")),
     };
-    let required = RequiredAccess {
-        min_tier: tier,
-        access_level: AccessLevel::LimitedWrite,
-        allowed_roles: None,
-    };
-    authorize(&claims, &required).map_err(|error| error.into_response(Some(request_id)))?;
+    require_role(&ctx, &[Role::Principal, Role::Proxy, Role::ExecutorNominee])
+        .map_err(|error| error.into_response(Some(request_id)))?;
+    require_tier(&ctx, TierRequirement::Allowlist(vec![tier]))
+        .map_err(|error| error.into_response(Some(request_id)))?;
+    require_scope(&ctx, "write:limited").map_err(|error| error.into_response(Some(request_id)))?;
 
     let mut tx = pool
         .begin()
@@ -247,7 +247,7 @@ async fn append_audit_event(
 
 async fn export_audit(
     State(state): State<AppState>,
-    Extension(claims): Extension<Claims>,
+    ctx: RequestContext,
     Extension(request_id): Extension<RequestId>,
     query: axum::extract::Query<AuditExportQuery>,
 ) -> Result<Json<serde_json::Value>, axum::response::Response> {
@@ -255,12 +255,11 @@ async fn export_audit(
         Some(pool) => pool,
         None => return Err(invalid_request(Some(request_id), "database unavailable")),
     };
-    let required = RequiredAccess {
-        min_tier: SensitivityTier::Green,
-        access_level: AccessLevel::ReadOnlyAll,
-        allowed_roles: None,
-    };
-    authorize(&claims, &required).map_err(|error| error.into_response(Some(request_id)))?;
+    require_role(&ctx, &[Role::Principal, Role::Proxy, Role::ExecutorNominee])
+        .map_err(|error| error.into_response(Some(request_id)))?;
+    require_tier(&ctx, TierRequirement::Min(SensitivityTier::Green))
+        .map_err(|error| error.into_response(Some(request_id)))?;
+    require_scope(&ctx, "read:all").map_err(|error| error.into_response(Some(request_id)))?;
 
     let _ = query.case_id.as_deref();
     let rows = sqlx::query(

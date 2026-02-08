@@ -7,22 +7,24 @@ use axum::{
 use chrono::{Duration as ChronoDuration, Utc};
 use lifeready_audit::{AuditEvent, InMemoryAuditSink};
 use lifeready_auth::{
-    auth_middleware, authorize, invalid_request, request_id_middleware, AccessLevel, AuthConfig,
-    AuthLayerState, Claims, RequestId, RequiredAccess, Role, SensitivityTier,
+    invalid_request, request_id_middleware, AuthConfig, AuthLayer, Claims, RequestContext,
+    RequestId, Role, SensitivityTier,
 };
+use lifeready_policy::{require_role, require_scope, require_tier, TierRequirement};
 use serde::{Deserialize, Serialize};
-use std::{net::SocketAddr, time::Duration};
+use std::net::SocketAddr;
+use std::sync::Arc;
 
 const TOKEN_TTL_SECONDS: i64 = 900;
 
 #[derive(Clone)]
 struct AppState {
     audit: InMemoryAuditSink,
-    auth: AuthConfig,
+    auth: Arc<AuthConfig>,
 }
 
 pub fn router() -> Router {
-    let auth = AuthConfig::from_env();
+    let auth = Arc::new(AuthConfig::from_env());
     let state = AppState {
         audit: InMemoryAuditSink::default(),
         auth: auth.clone(),
@@ -36,10 +38,7 @@ pub fn router() -> Router {
         .route("/v1/auth/mfa/verify", post(verify_mfa))
         .route("/v1/me", get(me))
         .with_state(state)
-        .layer(axum::middleware::from_fn_with_state(
-            AuthLayerState::new(auth, public_paths),
-            auth_middleware,
-        ))
+        .layer(AuthLayer::new(auth).with_allowlist(public_paths))
         .layer(axum::middleware::from_fn(request_id_middleware))
 }
 
@@ -48,6 +47,7 @@ async fn healthz() -> &'static str {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct LoginRequest {
     email: String,
     password: Option<String>,
@@ -55,6 +55,7 @@ struct LoginRequest {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct LoginClient {
     platform: String,
     device_name: Option<String>,
@@ -162,20 +163,26 @@ async fn verify_mfa(
 }
 
 async fn me(
-    Extension(claims): Extension<Claims>,
+    ctx: RequestContext,
     Extension(request_id): Extension<RequestId>,
 ) -> Result<Json<MeResponse>, axum::response::Response> {
-    let required = RequiredAccess {
-        min_tier: SensitivityTier::Green,
-        access_level: AccessLevel::ReadOnlyAll,
-        allowed_roles: None,
-    };
-
-    authorize(&claims, &required).map_err(|error| error.into_response(Some(request_id)))?;
+    require_role(
+        &ctx,
+        &[
+            Role::Principal,
+            Role::Proxy,
+            Role::ExecutorNominee,
+            Role::EmergencyContact,
+        ],
+    )
+    .map_err(|error| error.into_response(Some(request_id)))?;
+    require_tier(&ctx, TierRequirement::Min(SensitivityTier::Green))
+        .map_err(|error| error.into_response(Some(request_id)))?;
+    require_scope(&ctx, "read:all").map_err(|error| error.into_response(Some(request_id)))?;
 
     Ok(Json(MeResponse {
-        principal_id: claims.sub.clone(),
-        email: claims
+        principal_id: ctx.principal_id.clone(),
+        email: ctx
             .email
             .clone()
             .unwrap_or_else(|| "principal@example.com".into()),
@@ -185,9 +192,10 @@ async fn me(
 
 pub fn addr_from_env(default_port: u16) -> SocketAddr {
     let host = std::env::var("HOST").unwrap_or_else(|_| "0.0.0.0".into());
-    let port = std::env::var("PORT")
+    let port = std::env::var("IDENTITY_PORT")
         .ok()
         .and_then(|p| p.parse().ok())
+        .or_else(|| std::env::var("PORT").ok().and_then(|p| p.parse().ok()))
         .unwrap_or(default_port);
     format!("{host}:{port}").parse().expect("valid host:port")
 }

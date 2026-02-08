@@ -160,14 +160,15 @@ Validation uses `openapi-generator-cli validate --recommend`.
    cargo run -p audit_service
    ```
 
-   Default ports (override with `PORT` environment variable):
-   - identity-service: 8081
-   - estate-service: 8082
-   - vault-service: 8083
-   - case-service: 8084
-   - audit-service: 8085
+Default ports (override with `<SERVICE>_PORT` or `PORT` environment variables):
 
-7. Flutter
+- identity-service: 8081
+- estate-service: 8082
+- vault-service: 8083
+- case-service: 8084
+- audit-service: 8085
+
+1. Flutter
 
    ```bash
    make generate-flutter-tokens
