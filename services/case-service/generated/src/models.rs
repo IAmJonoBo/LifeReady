@@ -100,7 +100,7 @@ pub struct Case {
     pub created_at: chrono::DateTime<chrono::Utc>,
 
     #[serde(rename = "blocked_reasons")]
-    #[validate(custom(function = "check_xss_vec_string"))]
+    #[validate(length(max = 20), custom(function = "check_xss_vec_string"))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub blocked_reasons: Option<Vec<String>>,
 }
@@ -407,11 +407,11 @@ impl std::str::FromStr for CaseType {
 #[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
 pub struct EmergencyPackRequest {
     #[serde(rename = "directive_document_ids")]
-    #[validate(length(min = 1), nested)]
+    #[validate(length(min = 1, max = 50), nested)]
     pub directive_document_ids: Vec<models::Uuid>,
 
     #[serde(rename = "emergency_contacts")]
-    #[validate(length(min = 1), nested)]
+    #[validate(length(min = 1, max = 10), nested)]
     pub emergency_contacts: Vec<models::EmergencyPackRequestEmergencyContactsInner>,
 }
 
@@ -1271,7 +1271,7 @@ pub struct Mhca39Create {
     pub notes: Option<String>,
 
     #[serde(rename = "required_evidence_slots")]
-    #[validate(custom(function = "check_xss_vec_string"))]
+    #[validate(length(max = 20), custom(function = "check_xss_vec_string"))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub required_evidence_slots: Option<Vec<String>>,
 }
@@ -1504,7 +1504,7 @@ impl std::ops::DerefMut for Uuid {
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
 #[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
-pub struct V1CasesEmergencyPackPostDefaultResponse {
+pub struct V1CasesEmergencyPackPost400Response {
     #[serde(rename = "type")]
     #[validate(custom(function = "check_xss_string"))]
     pub r_type: String,
@@ -1537,14 +1537,10 @@ pub struct V1CasesEmergencyPackPostDefaultResponse {
     pub r_errors: Option<std::collections::HashMap<String, Vec<String>>>,
 }
 
-impl V1CasesEmergencyPackPostDefaultResponse {
+impl V1CasesEmergencyPackPost400Response {
     #[allow(clippy::new_without_default, clippy::too_many_arguments)]
-    pub fn new(
-        r_type: String,
-        title: String,
-        status: u16,
-    ) -> V1CasesEmergencyPackPostDefaultResponse {
-        V1CasesEmergencyPackPostDefaultResponse {
+    pub fn new(r_type: String, title: String, status: u16) -> V1CasesEmergencyPackPost400Response {
+        V1CasesEmergencyPackPost400Response {
             r_type,
             title,
             status,
@@ -1556,10 +1552,10 @@ impl V1CasesEmergencyPackPostDefaultResponse {
     }
 }
 
-/// Converts the V1CasesEmergencyPackPostDefaultResponse value to the Query Parameters representation (style=form, explode=false)
+/// Converts the V1CasesEmergencyPackPost400Response value to the Query Parameters representation (style=form, explode=false)
 /// specified in https://swagger.io/docs/specification/serialization/
 /// Should be implemented in a serde serializer
-impl std::fmt::Display for V1CasesEmergencyPackPostDefaultResponse {
+impl std::fmt::Display for V1CasesEmergencyPackPost400Response {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let params: Vec<Option<String>> = vec![
             Some("type".to_string()),
@@ -1588,10 +1584,10 @@ impl std::fmt::Display for V1CasesEmergencyPackPostDefaultResponse {
     }
 }
 
-/// Converts Query Parameters representation (style=form, explode=false) to a V1CasesEmergencyPackPostDefaultResponse value
+/// Converts Query Parameters representation (style=form, explode=false) to a V1CasesEmergencyPackPost400Response value
 /// as specified in https://swagger.io/docs/specification/serialization/
 /// Should be implemented in a serde deserializer
-impl std::str::FromStr for V1CasesEmergencyPackPostDefaultResponse {
+impl std::str::FromStr for V1CasesEmergencyPackPost400Response {
     type Err = String;
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
@@ -1619,7 +1615,7 @@ impl std::str::FromStr for V1CasesEmergencyPackPostDefaultResponse {
                 Some(x) => x,
                 None => {
                     return std::result::Result::Err(
-                        "Missing value while parsing V1CasesEmergencyPackPostDefaultResponse"
+                        "Missing value while parsing V1CasesEmergencyPackPost400Response"
                             .to_string(),
                     )
                 }
@@ -1640,8 +1636,8 @@ impl std::str::FromStr for V1CasesEmergencyPackPostDefaultResponse {
                     "instance" => intermediate_rep.instance.push(<String as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?),
                     #[allow(clippy::redundant_clone)]
                     "request_id" => intermediate_rep.request_id.push(<uuid::Uuid as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?),
-                    "errors" => return std::result::Result::Err("Parsing a container in this style is not supported in V1CasesEmergencyPackPostDefaultResponse".to_string()),
-                    _ => return std::result::Result::Err("Unexpected key while parsing V1CasesEmergencyPackPostDefaultResponse".to_string())
+                    "errors" => return std::result::Result::Err("Parsing a container in this style is not supported in V1CasesEmergencyPackPost400Response".to_string()),
+                    _ => return std::result::Result::Err("Unexpected key while parsing V1CasesEmergencyPackPost400Response".to_string())
                 }
             }
 
@@ -1650,15 +1646,17 @@ impl std::str::FromStr for V1CasesEmergencyPackPostDefaultResponse {
         }
 
         // Use the intermediate representation to return the struct
-        std::result::Result::Ok(V1CasesEmergencyPackPostDefaultResponse {
-            r_type: intermediate_rep.r_type.into_iter().next().ok_or_else(|| {
-                "type missing in V1CasesEmergencyPackPostDefaultResponse".to_string()
-            })?,
+        std::result::Result::Ok(V1CasesEmergencyPackPost400Response {
+            r_type: intermediate_rep
+                .r_type
+                .into_iter()
+                .next()
+                .ok_or_else(|| "type missing in V1CasesEmergencyPackPost400Response".to_string())?,
             title: intermediate_rep.title.into_iter().next().ok_or_else(|| {
-                "title missing in V1CasesEmergencyPackPostDefaultResponse".to_string()
+                "title missing in V1CasesEmergencyPackPost400Response".to_string()
             })?,
             status: intermediate_rep.status.into_iter().next().ok_or_else(|| {
-                "status missing in V1CasesEmergencyPackPostDefaultResponse".to_string()
+                "status missing in V1CasesEmergencyPackPost400Response".to_string()
             })?,
             detail: intermediate_rep.detail.into_iter().next(),
             instance: intermediate_rep.instance.into_iter().next(),
@@ -1668,22 +1666,22 @@ impl std::str::FromStr for V1CasesEmergencyPackPostDefaultResponse {
     }
 }
 
-// Methods for converting between header::IntoHeaderValue<V1CasesEmergencyPackPostDefaultResponse> and HeaderValue
+// Methods for converting between header::IntoHeaderValue<V1CasesEmergencyPackPost400Response> and HeaderValue
 
 #[cfg(feature = "server")]
-impl std::convert::TryFrom<header::IntoHeaderValue<V1CasesEmergencyPackPostDefaultResponse>>
+impl std::convert::TryFrom<header::IntoHeaderValue<V1CasesEmergencyPackPost400Response>>
     for HeaderValue
 {
     type Error = String;
 
     fn try_from(
-        hdr_value: header::IntoHeaderValue<V1CasesEmergencyPackPostDefaultResponse>,
+        hdr_value: header::IntoHeaderValue<V1CasesEmergencyPackPost400Response>,
     ) -> std::result::Result<Self, Self::Error> {
         let hdr_value = hdr_value.to_string();
         match HeaderValue::from_str(&hdr_value) {
             std::result::Result::Ok(value) => std::result::Result::Ok(value),
             std::result::Result::Err(e) => std::result::Result::Err(format!(
-                r#"Invalid header value for V1CasesEmergencyPackPostDefaultResponse - value: {hdr_value} is invalid {e}"#
+                r#"Invalid header value for V1CasesEmergencyPackPost400Response - value: {hdr_value} is invalid {e}"#
             )),
         }
     }
@@ -1691,21 +1689,19 @@ impl std::convert::TryFrom<header::IntoHeaderValue<V1CasesEmergencyPackPostDefau
 
 #[cfg(feature = "server")]
 impl std::convert::TryFrom<HeaderValue>
-    for header::IntoHeaderValue<V1CasesEmergencyPackPostDefaultResponse>
+    for header::IntoHeaderValue<V1CasesEmergencyPackPost400Response>
 {
     type Error = String;
 
     fn try_from(hdr_value: HeaderValue) -> std::result::Result<Self, Self::Error> {
         match hdr_value.to_str() {
             std::result::Result::Ok(value) => {
-                match <V1CasesEmergencyPackPostDefaultResponse as std::str::FromStr>::from_str(
-                    value,
-                ) {
+                match <V1CasesEmergencyPackPost400Response as std::str::FromStr>::from_str(value) {
                     std::result::Result::Ok(value) => {
                         std::result::Result::Ok(header::IntoHeaderValue(value))
                     }
                     std::result::Result::Err(err) => std::result::Result::Err(format!(
-                        r#"Unable to convert header value '{value}' into V1CasesEmergencyPackPostDefaultResponse - {err}"#
+                        r#"Unable to convert header value '{value}' into V1CasesEmergencyPackPost400Response - {err}"#
                     )),
                 }
             }

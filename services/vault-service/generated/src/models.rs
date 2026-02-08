@@ -108,7 +108,7 @@ pub struct Document {
     pub sensitivity: models::SensitivityTier,
 
     #[serde(rename = "tags")]
-    #[validate(custom(function = "check_xss_vec_string"))]
+    #[validate(length(max = 20), custom(function = "check_xss_vec_string"))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tags: Option<Vec<String>>,
 
@@ -539,7 +539,7 @@ pub struct DocumentInit {
     pub sensitivity: models::SensitivityTier,
 
     #[serde(rename = "tags")]
-    #[validate(custom(function = "check_xss_vec_string"))]
+    #[validate(length(max = 20), custom(function = "check_xss_vec_string"))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tags: Option<Vec<String>>,
 }
@@ -887,7 +887,7 @@ impl std::convert::TryFrom<HeaderValue> for header::IntoHeaderValue<DocumentInit
 #[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
 pub struct DocumentList {
     #[serde(rename = "items")]
-    #[validate(nested)]
+    #[validate(length(max = 200), nested)]
     pub items: Vec<models::Document>,
 }
 
@@ -1452,7 +1452,7 @@ impl std::ops::DerefMut for Uuid {
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
 #[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
-pub struct V1DocumentsGetDefaultResponse {
+pub struct V1DocumentsGet400Response {
     #[serde(rename = "type")]
     #[validate(custom(function = "check_xss_string"))]
     pub r_type: String,
@@ -1485,10 +1485,10 @@ pub struct V1DocumentsGetDefaultResponse {
     pub r_errors: Option<std::collections::HashMap<String, Vec<String>>>,
 }
 
-impl V1DocumentsGetDefaultResponse {
+impl V1DocumentsGet400Response {
     #[allow(clippy::new_without_default, clippy::too_many_arguments)]
-    pub fn new(r_type: String, title: String, status: u16) -> V1DocumentsGetDefaultResponse {
-        V1DocumentsGetDefaultResponse {
+    pub fn new(r_type: String, title: String, status: u16) -> V1DocumentsGet400Response {
+        V1DocumentsGet400Response {
             r_type,
             title,
             status,
@@ -1500,10 +1500,10 @@ impl V1DocumentsGetDefaultResponse {
     }
 }
 
-/// Converts the V1DocumentsGetDefaultResponse value to the Query Parameters representation (style=form, explode=false)
+/// Converts the V1DocumentsGet400Response value to the Query Parameters representation (style=form, explode=false)
 /// specified in https://swagger.io/docs/specification/serialization/
 /// Should be implemented in a serde serializer
-impl std::fmt::Display for V1DocumentsGetDefaultResponse {
+impl std::fmt::Display for V1DocumentsGet400Response {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let params: Vec<Option<String>> = vec![
             Some("type".to_string()),
@@ -1532,10 +1532,10 @@ impl std::fmt::Display for V1DocumentsGetDefaultResponse {
     }
 }
 
-/// Converts Query Parameters representation (style=form, explode=false) to a V1DocumentsGetDefaultResponse value
+/// Converts Query Parameters representation (style=form, explode=false) to a V1DocumentsGet400Response value
 /// as specified in https://swagger.io/docs/specification/serialization/
 /// Should be implemented in a serde deserializer
-impl std::str::FromStr for V1DocumentsGetDefaultResponse {
+impl std::str::FromStr for V1DocumentsGet400Response {
     type Err = String;
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
@@ -1563,7 +1563,7 @@ impl std::str::FromStr for V1DocumentsGetDefaultResponse {
                 Some(x) => x,
                 None => {
                     return std::result::Result::Err(
-                        "Missing value while parsing V1DocumentsGetDefaultResponse".to_string(),
+                        "Missing value while parsing V1DocumentsGet400Response".to_string(),
                     )
                 }
             };
@@ -1583,8 +1583,8 @@ impl std::str::FromStr for V1DocumentsGetDefaultResponse {
                     "instance" => intermediate_rep.instance.push(<String as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?),
                     #[allow(clippy::redundant_clone)]
                     "request_id" => intermediate_rep.request_id.push(<uuid::Uuid as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?),
-                    "errors" => return std::result::Result::Err("Parsing a container in this style is not supported in V1DocumentsGetDefaultResponse".to_string()),
-                    _ => return std::result::Result::Err("Unexpected key while parsing V1DocumentsGetDefaultResponse".to_string())
+                    "errors" => return std::result::Result::Err("Parsing a container in this style is not supported in V1DocumentsGet400Response".to_string()),
+                    _ => return std::result::Result::Err("Unexpected key while parsing V1DocumentsGet400Response".to_string())
                 }
             }
 
@@ -1593,22 +1593,22 @@ impl std::str::FromStr for V1DocumentsGetDefaultResponse {
         }
 
         // Use the intermediate representation to return the struct
-        std::result::Result::Ok(V1DocumentsGetDefaultResponse {
+        std::result::Result::Ok(V1DocumentsGet400Response {
             r_type: intermediate_rep
                 .r_type
                 .into_iter()
                 .next()
-                .ok_or_else(|| "type missing in V1DocumentsGetDefaultResponse".to_string())?,
+                .ok_or_else(|| "type missing in V1DocumentsGet400Response".to_string())?,
             title: intermediate_rep
                 .title
                 .into_iter()
                 .next()
-                .ok_or_else(|| "title missing in V1DocumentsGetDefaultResponse".to_string())?,
+                .ok_or_else(|| "title missing in V1DocumentsGet400Response".to_string())?,
             status: intermediate_rep
                 .status
                 .into_iter()
                 .next()
-                .ok_or_else(|| "status missing in V1DocumentsGetDefaultResponse".to_string())?,
+                .ok_or_else(|| "status missing in V1DocumentsGet400Response".to_string())?,
             detail: intermediate_rep.detail.into_iter().next(),
             instance: intermediate_rep.instance.into_iter().next(),
             request_id: intermediate_rep.request_id.into_iter().next(),
@@ -1617,38 +1617,38 @@ impl std::str::FromStr for V1DocumentsGetDefaultResponse {
     }
 }
 
-// Methods for converting between header::IntoHeaderValue<V1DocumentsGetDefaultResponse> and HeaderValue
+// Methods for converting between header::IntoHeaderValue<V1DocumentsGet400Response> and HeaderValue
 
 #[cfg(feature = "server")]
-impl std::convert::TryFrom<header::IntoHeaderValue<V1DocumentsGetDefaultResponse>> for HeaderValue {
+impl std::convert::TryFrom<header::IntoHeaderValue<V1DocumentsGet400Response>> for HeaderValue {
     type Error = String;
 
     fn try_from(
-        hdr_value: header::IntoHeaderValue<V1DocumentsGetDefaultResponse>,
+        hdr_value: header::IntoHeaderValue<V1DocumentsGet400Response>,
     ) -> std::result::Result<Self, Self::Error> {
         let hdr_value = hdr_value.to_string();
         match HeaderValue::from_str(&hdr_value) {
             std::result::Result::Ok(value) => std::result::Result::Ok(value),
             std::result::Result::Err(e) => std::result::Result::Err(format!(
-                r#"Invalid header value for V1DocumentsGetDefaultResponse - value: {hdr_value} is invalid {e}"#
+                r#"Invalid header value for V1DocumentsGet400Response - value: {hdr_value} is invalid {e}"#
             )),
         }
     }
 }
 
 #[cfg(feature = "server")]
-impl std::convert::TryFrom<HeaderValue> for header::IntoHeaderValue<V1DocumentsGetDefaultResponse> {
+impl std::convert::TryFrom<HeaderValue> for header::IntoHeaderValue<V1DocumentsGet400Response> {
     type Error = String;
 
     fn try_from(hdr_value: HeaderValue) -> std::result::Result<Self, Self::Error> {
         match hdr_value.to_str() {
             std::result::Result::Ok(value) => {
-                match <V1DocumentsGetDefaultResponse as std::str::FromStr>::from_str(value) {
+                match <V1DocumentsGet400Response as std::str::FromStr>::from_str(value) {
                     std::result::Result::Ok(value) => {
                         std::result::Result::Ok(header::IntoHeaderValue(value))
                     }
                     std::result::Result::Err(err) => std::result::Result::Err(format!(
-                        r#"Unable to convert header value '{value}' into V1DocumentsGetDefaultResponse - {err}"#
+                        r#"Unable to convert header value '{value}' into V1DocumentsGet400Response - {err}"#
                     )),
                 }
             }

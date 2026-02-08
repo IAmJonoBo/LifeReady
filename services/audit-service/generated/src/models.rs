@@ -814,7 +814,7 @@ impl std::ops::DerefMut for Uuid {
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
 #[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
-pub struct V1AuditEventsPostDefaultResponse {
+pub struct V1AuditEventsPost400Response {
     #[serde(rename = "type")]
     #[validate(custom(function = "check_xss_string"))]
     pub r_type: String,
@@ -847,10 +847,10 @@ pub struct V1AuditEventsPostDefaultResponse {
     pub r_errors: Option<std::collections::HashMap<String, Vec<String>>>,
 }
 
-impl V1AuditEventsPostDefaultResponse {
+impl V1AuditEventsPost400Response {
     #[allow(clippy::new_without_default, clippy::too_many_arguments)]
-    pub fn new(r_type: String, title: String, status: u16) -> V1AuditEventsPostDefaultResponse {
-        V1AuditEventsPostDefaultResponse {
+    pub fn new(r_type: String, title: String, status: u16) -> V1AuditEventsPost400Response {
+        V1AuditEventsPost400Response {
             r_type,
             title,
             status,
@@ -862,10 +862,10 @@ impl V1AuditEventsPostDefaultResponse {
     }
 }
 
-/// Converts the V1AuditEventsPostDefaultResponse value to the Query Parameters representation (style=form, explode=false)
+/// Converts the V1AuditEventsPost400Response value to the Query Parameters representation (style=form, explode=false)
 /// specified in https://swagger.io/docs/specification/serialization/
 /// Should be implemented in a serde serializer
-impl std::fmt::Display for V1AuditEventsPostDefaultResponse {
+impl std::fmt::Display for V1AuditEventsPost400Response {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let params: Vec<Option<String>> = vec![
             Some("type".to_string()),
@@ -894,10 +894,10 @@ impl std::fmt::Display for V1AuditEventsPostDefaultResponse {
     }
 }
 
-/// Converts Query Parameters representation (style=form, explode=false) to a V1AuditEventsPostDefaultResponse value
+/// Converts Query Parameters representation (style=form, explode=false) to a V1AuditEventsPost400Response value
 /// as specified in https://swagger.io/docs/specification/serialization/
 /// Should be implemented in a serde deserializer
-impl std::str::FromStr for V1AuditEventsPostDefaultResponse {
+impl std::str::FromStr for V1AuditEventsPost400Response {
     type Err = String;
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
@@ -925,7 +925,7 @@ impl std::str::FromStr for V1AuditEventsPostDefaultResponse {
                 Some(x) => x,
                 None => {
                     return std::result::Result::Err(
-                        "Missing value while parsing V1AuditEventsPostDefaultResponse".to_string(),
+                        "Missing value while parsing V1AuditEventsPost400Response".to_string(),
                     )
                 }
             };
@@ -945,8 +945,8 @@ impl std::str::FromStr for V1AuditEventsPostDefaultResponse {
                     "instance" => intermediate_rep.instance.push(<String as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?),
                     #[allow(clippy::redundant_clone)]
                     "request_id" => intermediate_rep.request_id.push(<uuid::Uuid as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?),
-                    "errors" => return std::result::Result::Err("Parsing a container in this style is not supported in V1AuditEventsPostDefaultResponse".to_string()),
-                    _ => return std::result::Result::Err("Unexpected key while parsing V1AuditEventsPostDefaultResponse".to_string())
+                    "errors" => return std::result::Result::Err("Parsing a container in this style is not supported in V1AuditEventsPost400Response".to_string()),
+                    _ => return std::result::Result::Err("Unexpected key while parsing V1AuditEventsPost400Response".to_string())
                 }
             }
 
@@ -955,22 +955,22 @@ impl std::str::FromStr for V1AuditEventsPostDefaultResponse {
         }
 
         // Use the intermediate representation to return the struct
-        std::result::Result::Ok(V1AuditEventsPostDefaultResponse {
+        std::result::Result::Ok(V1AuditEventsPost400Response {
             r_type: intermediate_rep
                 .r_type
                 .into_iter()
                 .next()
-                .ok_or_else(|| "type missing in V1AuditEventsPostDefaultResponse".to_string())?,
+                .ok_or_else(|| "type missing in V1AuditEventsPost400Response".to_string())?,
             title: intermediate_rep
                 .title
                 .into_iter()
                 .next()
-                .ok_or_else(|| "title missing in V1AuditEventsPostDefaultResponse".to_string())?,
+                .ok_or_else(|| "title missing in V1AuditEventsPost400Response".to_string())?,
             status: intermediate_rep
                 .status
                 .into_iter()
                 .next()
-                .ok_or_else(|| "status missing in V1AuditEventsPostDefaultResponse".to_string())?,
+                .ok_or_else(|| "status missing in V1AuditEventsPost400Response".to_string())?,
             detail: intermediate_rep.detail.into_iter().next(),
             instance: intermediate_rep.instance.into_iter().next(),
             request_id: intermediate_rep.request_id.into_iter().next(),
@@ -979,42 +979,38 @@ impl std::str::FromStr for V1AuditEventsPostDefaultResponse {
     }
 }
 
-// Methods for converting between header::IntoHeaderValue<V1AuditEventsPostDefaultResponse> and HeaderValue
+// Methods for converting between header::IntoHeaderValue<V1AuditEventsPost400Response> and HeaderValue
 
 #[cfg(feature = "server")]
-impl std::convert::TryFrom<header::IntoHeaderValue<V1AuditEventsPostDefaultResponse>>
-    for HeaderValue
-{
+impl std::convert::TryFrom<header::IntoHeaderValue<V1AuditEventsPost400Response>> for HeaderValue {
     type Error = String;
 
     fn try_from(
-        hdr_value: header::IntoHeaderValue<V1AuditEventsPostDefaultResponse>,
+        hdr_value: header::IntoHeaderValue<V1AuditEventsPost400Response>,
     ) -> std::result::Result<Self, Self::Error> {
         let hdr_value = hdr_value.to_string();
         match HeaderValue::from_str(&hdr_value) {
             std::result::Result::Ok(value) => std::result::Result::Ok(value),
             std::result::Result::Err(e) => std::result::Result::Err(format!(
-                r#"Invalid header value for V1AuditEventsPostDefaultResponse - value: {hdr_value} is invalid {e}"#
+                r#"Invalid header value for V1AuditEventsPost400Response - value: {hdr_value} is invalid {e}"#
             )),
         }
     }
 }
 
 #[cfg(feature = "server")]
-impl std::convert::TryFrom<HeaderValue>
-    for header::IntoHeaderValue<V1AuditEventsPostDefaultResponse>
-{
+impl std::convert::TryFrom<HeaderValue> for header::IntoHeaderValue<V1AuditEventsPost400Response> {
     type Error = String;
 
     fn try_from(hdr_value: HeaderValue) -> std::result::Result<Self, Self::Error> {
         match hdr_value.to_str() {
             std::result::Result::Ok(value) => {
-                match <V1AuditEventsPostDefaultResponse as std::str::FromStr>::from_str(value) {
+                match <V1AuditEventsPost400Response as std::str::FromStr>::from_str(value) {
                     std::result::Result::Ok(value) => {
                         std::result::Result::Ok(header::IntoHeaderValue(value))
                     }
                     std::result::Result::Err(err) => std::result::Result::Err(format!(
-                        r#"Unable to convert header value '{value}' into V1AuditEventsPostDefaultResponse - {err}"#
+                        r#"Unable to convert header value '{value}' into V1AuditEventsPost400Response - {err}"#
                     )),
                 }
             }

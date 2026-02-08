@@ -162,7 +162,7 @@ pub struct LoginChallenge {
 
     /// Note: inline enums are not fully supported by openapi-generator
     #[serde(rename = "mfa_methods")]
-    #[validate(custom(function = "check_xss_vec_string"))]
+    #[validate(length(max = 5), custom(function = "check_xss_vec_string"))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mfa_methods: Option<Vec<String>>,
 }
@@ -1171,7 +1171,7 @@ impl std::ops::DerefMut for Uuid {
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
 #[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
-pub struct V1AuthLoginPostDefaultResponse {
+pub struct V1AuthLoginPost400Response {
     #[serde(rename = "type")]
     #[validate(custom(function = "check_xss_string"))]
     pub r_type: String,
@@ -1204,10 +1204,10 @@ pub struct V1AuthLoginPostDefaultResponse {
     pub r_errors: Option<std::collections::HashMap<String, Vec<String>>>,
 }
 
-impl V1AuthLoginPostDefaultResponse {
+impl V1AuthLoginPost400Response {
     #[allow(clippy::new_without_default, clippy::too_many_arguments)]
-    pub fn new(r_type: String, title: String, status: u16) -> V1AuthLoginPostDefaultResponse {
-        V1AuthLoginPostDefaultResponse {
+    pub fn new(r_type: String, title: String, status: u16) -> V1AuthLoginPost400Response {
+        V1AuthLoginPost400Response {
             r_type,
             title,
             status,
@@ -1219,10 +1219,10 @@ impl V1AuthLoginPostDefaultResponse {
     }
 }
 
-/// Converts the V1AuthLoginPostDefaultResponse value to the Query Parameters representation (style=form, explode=false)
+/// Converts the V1AuthLoginPost400Response value to the Query Parameters representation (style=form, explode=false)
 /// specified in https://swagger.io/docs/specification/serialization/
 /// Should be implemented in a serde serializer
-impl std::fmt::Display for V1AuthLoginPostDefaultResponse {
+impl std::fmt::Display for V1AuthLoginPost400Response {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let params: Vec<Option<String>> = vec![
             Some("type".to_string()),
@@ -1251,10 +1251,10 @@ impl std::fmt::Display for V1AuthLoginPostDefaultResponse {
     }
 }
 
-/// Converts Query Parameters representation (style=form, explode=false) to a V1AuthLoginPostDefaultResponse value
+/// Converts Query Parameters representation (style=form, explode=false) to a V1AuthLoginPost400Response value
 /// as specified in https://swagger.io/docs/specification/serialization/
 /// Should be implemented in a serde deserializer
-impl std::str::FromStr for V1AuthLoginPostDefaultResponse {
+impl std::str::FromStr for V1AuthLoginPost400Response {
     type Err = String;
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
@@ -1282,7 +1282,7 @@ impl std::str::FromStr for V1AuthLoginPostDefaultResponse {
                 Some(x) => x,
                 None => {
                     return std::result::Result::Err(
-                        "Missing value while parsing V1AuthLoginPostDefaultResponse".to_string(),
+                        "Missing value while parsing V1AuthLoginPost400Response".to_string(),
                     )
                 }
             };
@@ -1302,8 +1302,8 @@ impl std::str::FromStr for V1AuthLoginPostDefaultResponse {
                     "instance" => intermediate_rep.instance.push(<String as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?),
                     #[allow(clippy::redundant_clone)]
                     "request_id" => intermediate_rep.request_id.push(<uuid::Uuid as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?),
-                    "errors" => return std::result::Result::Err("Parsing a container in this style is not supported in V1AuthLoginPostDefaultResponse".to_string()),
-                    _ => return std::result::Result::Err("Unexpected key while parsing V1AuthLoginPostDefaultResponse".to_string())
+                    "errors" => return std::result::Result::Err("Parsing a container in this style is not supported in V1AuthLoginPost400Response".to_string()),
+                    _ => return std::result::Result::Err("Unexpected key while parsing V1AuthLoginPost400Response".to_string())
                 }
             }
 
@@ -1312,22 +1312,22 @@ impl std::str::FromStr for V1AuthLoginPostDefaultResponse {
         }
 
         // Use the intermediate representation to return the struct
-        std::result::Result::Ok(V1AuthLoginPostDefaultResponse {
+        std::result::Result::Ok(V1AuthLoginPost400Response {
             r_type: intermediate_rep
                 .r_type
                 .into_iter()
                 .next()
-                .ok_or_else(|| "type missing in V1AuthLoginPostDefaultResponse".to_string())?,
+                .ok_or_else(|| "type missing in V1AuthLoginPost400Response".to_string())?,
             title: intermediate_rep
                 .title
                 .into_iter()
                 .next()
-                .ok_or_else(|| "title missing in V1AuthLoginPostDefaultResponse".to_string())?,
+                .ok_or_else(|| "title missing in V1AuthLoginPost400Response".to_string())?,
             status: intermediate_rep
                 .status
                 .into_iter()
                 .next()
-                .ok_or_else(|| "status missing in V1AuthLoginPostDefaultResponse".to_string())?,
+                .ok_or_else(|| "status missing in V1AuthLoginPost400Response".to_string())?,
             detail: intermediate_rep.detail.into_iter().next(),
             instance: intermediate_rep.instance.into_iter().next(),
             request_id: intermediate_rep.request_id.into_iter().next(),
@@ -1336,42 +1336,38 @@ impl std::str::FromStr for V1AuthLoginPostDefaultResponse {
     }
 }
 
-// Methods for converting between header::IntoHeaderValue<V1AuthLoginPostDefaultResponse> and HeaderValue
+// Methods for converting between header::IntoHeaderValue<V1AuthLoginPost400Response> and HeaderValue
 
 #[cfg(feature = "server")]
-impl std::convert::TryFrom<header::IntoHeaderValue<V1AuthLoginPostDefaultResponse>>
-    for HeaderValue
-{
+impl std::convert::TryFrom<header::IntoHeaderValue<V1AuthLoginPost400Response>> for HeaderValue {
     type Error = String;
 
     fn try_from(
-        hdr_value: header::IntoHeaderValue<V1AuthLoginPostDefaultResponse>,
+        hdr_value: header::IntoHeaderValue<V1AuthLoginPost400Response>,
     ) -> std::result::Result<Self, Self::Error> {
         let hdr_value = hdr_value.to_string();
         match HeaderValue::from_str(&hdr_value) {
             std::result::Result::Ok(value) => std::result::Result::Ok(value),
             std::result::Result::Err(e) => std::result::Result::Err(format!(
-                r#"Invalid header value for V1AuthLoginPostDefaultResponse - value: {hdr_value} is invalid {e}"#
+                r#"Invalid header value for V1AuthLoginPost400Response - value: {hdr_value} is invalid {e}"#
             )),
         }
     }
 }
 
 #[cfg(feature = "server")]
-impl std::convert::TryFrom<HeaderValue>
-    for header::IntoHeaderValue<V1AuthLoginPostDefaultResponse>
-{
+impl std::convert::TryFrom<HeaderValue> for header::IntoHeaderValue<V1AuthLoginPost400Response> {
     type Error = String;
 
     fn try_from(hdr_value: HeaderValue) -> std::result::Result<Self, Self::Error> {
         match hdr_value.to_str() {
             std::result::Result::Ok(value) => {
-                match <V1AuthLoginPostDefaultResponse as std::str::FromStr>::from_str(value) {
+                match <V1AuthLoginPost400Response as std::str::FromStr>::from_str(value) {
                     std::result::Result::Ok(value) => {
                         std::result::Result::Ok(header::IntoHeaderValue(value))
                     }
                     std::result::Result::Err(err) => std::result::Result::Err(format!(
-                        r#"Unable to convert header value '{value}' into V1AuthLoginPostDefaultResponse - {err}"#
+                        r#"Unable to convert header value '{value}' into V1AuthLoginPost400Response - {err}"#
                     )),
                 }
             }

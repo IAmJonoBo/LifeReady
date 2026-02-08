@@ -7,99 +7,172 @@ servers:
   - url: https://api.lifeready.local/case
 tags:
   - name: cases
+security:
+  - bearerAuth: []
 paths:
   /v1/cases/emergency-pack:
     post:
       tags: [cases]
-      security: [{ bearerAuth: [] }]
+      security:
+        - bearerAuth: []
       summary: Create or refresh Emergency Directive Pack
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/EmergencyPackRequest" }
+            schema:
+              $ref: "#/components/schemas/EmergencyPackRequest"
       responses:
         "201":
           description: Created
+          headers:
+            X-Request-Id:
+              $ref: "./common.openapi.yaml#/components/headers/X-Request-Id"
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/Case" }
-        default:
-          $ref: "./common.openapi.yaml#/components/responses/ProblemDetails"
-
+              schema:
+                $ref: "#/components/schemas/Case"
+        "400":
+          $ref: "./common.openapi.yaml#/components/responses/ProblemDetailsResponse"
+        "401":
+          $ref: "./common.openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "./common.openapi.yaml#/components/responses/Forbidden"
+        "409":
+          $ref: "./common.openapi.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "./common.openapi.yaml#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "./common.openapi.yaml#/components/responses/ServerError"
   /v1/cases/mhca39:
     post:
       tags: [cases]
-      security: [{ bearerAuth: [] }]
+      security:
+        - bearerAuth: []
       summary: Create MHCA 39 case (guided evidence pack; no incapacity claims)
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/Mhca39Create" }
+            schema:
+              $ref: "#/components/schemas/Mhca39Create"
       responses:
         "201":
           description: Created
+          headers:
+            X-Request-Id:
+              $ref: "./common.openapi.yaml#/components/headers/X-Request-Id"
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/Case" }
-        default:
-          $ref: "./common.openapi.yaml#/components/responses/ProblemDetails"
-
+              schema:
+                $ref: "#/components/schemas/Case"
+        "400":
+          $ref: "./common.openapi.yaml#/components/responses/ProblemDetailsResponse"
+        "401":
+          $ref: "./common.openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "./common.openapi.yaml#/components/responses/Forbidden"
+        "409":
+          $ref: "./common.openapi.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "./common.openapi.yaml#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "./common.openapi.yaml#/components/responses/ServerError"
   /v1/cases/{case_id}/export:
     post:
       tags: [cases]
-      security: [{ bearerAuth: [] }]
+      security:
+        - bearerAuth: []
       summary: Export submission pack (blocked until requirements met)
       parameters:
         - in: path
           name: case_id
           required: true
-          schema: { $ref: "#/components/schemas/Uuid" }
+          schema:
+            $ref: "#/components/schemas/Uuid"
       responses:
         "200":
           description: Export ready
+          headers:
+            X-Request-Id:
+              $ref: "./common.openapi.yaml#/components/headers/X-Request-Id"
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/ExportResponse" }
-        default:
-          $ref: "./common.openapi.yaml#/components/responses/ProblemDetails"
-
+              schema:
+                $ref: "#/components/schemas/ExportResponse"
+        "400":
+          $ref: "./common.openapi.yaml#/components/responses/ProblemDetailsResponse"
+        "401":
+          $ref: "./common.openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "./common.openapi.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "./common.openapi.yaml#/components/responses/NotFound"
+        "409":
+          $ref: "./common.openapi.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "./common.openapi.yaml#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "./common.openapi.yaml#/components/responses/ServerError"
   /v1/cases/{case_id}/evidence/{slot_name}:
     put:
       tags: [cases]
-      security: [{ bearerAuth: [] }]
+      security:
+        - bearerAuth: []
       summary: Attach evidence document to a slot
       parameters:
         - in: path
           name: case_id
           required: true
-          schema: { $ref: "#/components/schemas/Uuid" }
+          schema:
+            $ref: "#/components/schemas/Uuid"
         - in: path
           name: slot_name
           required: true
-          schema: { type: string, maxLength: 120 }
+          schema:
+            type: string
+            maxLength: 120
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/EvidenceAttach" }
+            schema:
+              $ref: "#/components/schemas/EvidenceAttach"
       responses:
         "200":
           description: Updated
+          headers:
+            X-Request-Id:
+              $ref: "./common.openapi.yaml#/components/headers/X-Request-Id"
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/EvidenceSlot" }
-        default:
-          $ref: "./common.openapi.yaml#/components/responses/ProblemDetails"
-
+              schema:
+                $ref: "#/components/schemas/EvidenceSlot"
+        "400":
+          $ref: "./common.openapi.yaml#/components/responses/ProblemDetailsResponse"
+        "401":
+          $ref: "./common.openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "./common.openapi.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "./common.openapi.yaml#/components/responses/NotFound"
+        "409":
+          $ref: "./common.openapi.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "./common.openapi.yaml#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "./common.openapi.yaml#/components/responses/ServerError"
 components:
   securitySchemes:
-    bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
   schemas:
-    Uuid: { $ref: "./common.openapi.yaml#/components/schemas/Uuid" }
+    Uuid:
+      $ref: "./common.openapi.yaml#/components/schemas/Uuid"
     IsoDateTime:
-      { $ref: "./common.openapi.yaml#/components/schemas/IsoDateTime" }
+      $ref: "./common.openapi.yaml#/components/schemas/IsoDateTime"
     CaseType:
       type: string
       enum: [emergency_pack, mhca39, death_readiness]
@@ -110,13 +183,19 @@ components:
       type: object
       required: [case_id, case_type, status, created_at]
       properties:
-        case_id: { $ref: "#/components/schemas/Uuid" }
-        case_type: { $ref: "#/components/schemas/CaseType" }
-        status: { $ref: "#/components/schemas/CaseStatus" }
-        created_at: { $ref: "#/components/schemas/IsoDateTime" }
+        case_id:
+          $ref: "#/components/schemas/Uuid"
+        case_type:
+          $ref: "#/components/schemas/CaseType"
+        status:
+          $ref: "#/components/schemas/CaseStatus"
+        created_at:
+          $ref: "#/components/schemas/IsoDateTime"
         blocked_reasons:
           type: array
-          items: { type: string }
+          maxItems: 20
+          items:
+            type: string
     EmergencyPackRequest:
       type: object
       required: [directive_document_ids, emergency_contacts]
@@ -124,43 +203,61 @@ components:
         directive_document_ids:
           type: array
           minItems: 1
-          items: { $ref: "#/components/schemas/Uuid" }
+          maxItems: 50
+          items:
+            $ref: "#/components/schemas/Uuid"
         emergency_contacts:
           type: array
           minItems: 1
+          maxItems: 10
           items:
             type: object
             required: [name, phone_e164]
             properties:
-              name: { type: string, maxLength: 120 }
-              phone_e164: { type: string, maxLength: 20 }
-              relationship: { type: string, maxLength: 80 }
+              name:
+                type: string
+                maxLength: 120
+              phone_e164:
+                type: string
+                maxLength: 20
+              relationship:
+                type: string
+                maxLength: 80
     Mhca39Create:
       type: object
       required: [subject_person_id, applicant_person_id]
       properties:
-        subject_person_id: { $ref: "#/components/schemas/Uuid" }
-        applicant_person_id: { $ref: "#/components/schemas/Uuid" }
-        relationship_to_subject: { type: string, maxLength: 80 }
-        notes: { type: string, maxLength: 4000 }
+        subject_person_id:
+          $ref: "#/components/schemas/Uuid"
+        applicant_person_id:
+          $ref: "#/components/schemas/Uuid"
+        relationship_to_subject:
+          type: string
+          maxLength: 80
+        notes:
+          type: string
+          maxLength: 4000
         required_evidence_slots:
           type: array
           default:
-            [
-              "id_subject",
-              "id_applicant",
-              "address_subject",
-              "asset_summary",
-              "medical_evidence_1",
-              "medical_evidence_2",
-            ]
-          items: { type: string }
+            - id_subject
+            - id_applicant
+            - address_subject
+            - asset_summary
+            - medical_evidence_1
+            - medical_evidence_2
+          maxItems: 20
+          items:
+            type: string
     ExportResponse:
       type: object
       required: [download_url, expires_at, manifest_sha256]
       properties:
-        download_url: { type: string, format: uri }
-        expires_at: { $ref: "#/components/schemas/IsoDateTime" }
+        download_url:
+          type: string
+          format: uri
+        expires_at:
+          $ref: "#/components/schemas/IsoDateTime"
         manifest_sha256:
           type: string
           pattern: "^[a-f0-9]{64}$"
@@ -168,11 +265,15 @@ components:
       type: object
       required: [document_id]
       properties:
-        document_id: { $ref: "#/components/schemas/Uuid" }
+        document_id:
+          $ref: "#/components/schemas/Uuid"
     EvidenceSlot:
       type: object
       required: [slot_name, document_id, added_at]
       properties:
-        slot_name: { type: string }
-        document_id: { $ref: "#/components/schemas/Uuid" }
-        added_at: { $ref: "#/components/schemas/IsoDateTime" }
+        slot_name:
+          type: string
+        document_id:
+          $ref: "#/components/schemas/Uuid"
+        added_at:
+          $ref: "#/components/schemas/IsoDateTime"

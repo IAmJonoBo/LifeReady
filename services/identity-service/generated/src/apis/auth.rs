@@ -13,9 +13,35 @@ use crate::{models, types::*};
 #[allow(clippy::large_enum_variant)]
 pub enum V1AuthLoginPostResponse {
     /// Challenge created
-    Status200_ChallengeCreated(models::LoginChallenge),
+    Status200_ChallengeCreated {
+        body: models::LoginChallenge,
+        x_request_id: Option<uuid::Uuid>,
+    },
     /// Error response
-    Status0_ErrorResponse(models::V1AuthLoginPostDefaultResponse),
+    Status400_ErrorResponse {
+        body: models::V1AuthLoginPost400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
+    /// Unauthorized
+    Status401_Unauthorized {
+        body: models::V1AuthLoginPost400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
+    /// Forbidden
+    Status403_Forbidden {
+        body: models::V1AuthLoginPost400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
+    /// Unprocessable Entity
+    Status422_UnprocessableEntity {
+        body: models::V1AuthLoginPost400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
+    /// Internal Server Error
+    Status500_InternalServerError {
+        body: models::V1AuthLoginPost400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -23,9 +49,35 @@ pub enum V1AuthLoginPostResponse {
 #[allow(clippy::large_enum_variant)]
 pub enum V1AuthMfaVerifyPostResponse {
     /// Session issued
-    Status200_SessionIssued(models::Session),
+    Status200_SessionIssued {
+        body: models::Session,
+        x_request_id: Option<uuid::Uuid>,
+    },
     /// Error response
-    Status0_ErrorResponse(models::V1AuthLoginPostDefaultResponse),
+    Status400_ErrorResponse {
+        body: models::V1AuthLoginPost400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
+    /// Unauthorized
+    Status401_Unauthorized {
+        body: models::V1AuthLoginPost400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
+    /// Forbidden
+    Status403_Forbidden {
+        body: models::V1AuthLoginPost400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
+    /// Unprocessable Entity
+    Status422_UnprocessableEntity {
+        body: models::V1AuthLoginPost400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
+    /// Internal Server Error
+    Status500_InternalServerError {
+        body: models::V1AuthLoginPost400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -33,9 +85,25 @@ pub enum V1AuthMfaVerifyPostResponse {
 #[allow(clippy::large_enum_variant)]
 pub enum V1MeGetResponse {
     /// Current principal profile
-    Status200_CurrentPrincipalProfile(models::Me),
-    /// Error response
-    Status0_ErrorResponse(models::V1AuthLoginPostDefaultResponse),
+    Status200_CurrentPrincipalProfile {
+        body: models::Me,
+        x_request_id: Option<uuid::Uuid>,
+    },
+    /// Unauthorized
+    Status401_Unauthorized {
+        body: models::V1AuthLoginPost400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
+    /// Forbidden
+    Status403_Forbidden {
+        body: models::V1AuthLoginPost400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
+    /// Internal Server Error
+    Status500_InternalServerError {
+        body: models::V1AuthLoginPost400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
 }
 
 /// Auth
@@ -53,6 +121,7 @@ pub trait Auth<E: std::fmt::Debug + Send + Sync + 'static = ()>: super::ErrorHan
         method: &Method,
         host: &Host,
         cookies: &CookieJar,
+        claims: &Self::Claims,
         body: &models::LoginRequest,
     ) -> Result<V1AuthLoginPostResponse, E>;
 
@@ -65,6 +134,7 @@ pub trait Auth<E: std::fmt::Debug + Send + Sync + 'static = ()>: super::ErrorHan
         method: &Method,
         host: &Host,
         cookies: &CookieJar,
+        claims: &Self::Claims,
         body: &models::MfaVerifyRequest,
     ) -> Result<V1AuthMfaVerifyPostResponse, E>;
 

@@ -13,9 +13,35 @@ use crate::{models, types::*};
 #[allow(clippy::large_enum_variant)]
 pub enum V1DocumentsDocumentIdGetResponse {
     /// OK
-    Status200_OK(models::Document),
+    Status200_OK {
+        body: models::Document,
+        x_request_id: Option<uuid::Uuid>,
+    },
     /// Error response
-    Status0_ErrorResponse(models::V1DocumentsGetDefaultResponse),
+    Status400_ErrorResponse {
+        body: models::V1DocumentsGet400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
+    /// Unauthorized
+    Status401_Unauthorized {
+        body: models::V1DocumentsGet400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
+    /// Forbidden
+    Status403_Forbidden {
+        body: models::V1DocumentsGet400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
+    /// Not Found
+    Status404_NotFound {
+        body: models::V1DocumentsGet400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
+    /// Internal Server Error
+    Status500_InternalServerError {
+        body: models::V1DocumentsGet400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -23,9 +49,45 @@ pub enum V1DocumentsDocumentIdGetResponse {
 #[allow(clippy::large_enum_variant)]
 pub enum V1DocumentsDocumentIdVersionsPostResponse {
     /// Version committed
-    Status201_VersionCommitted(models::DocumentVersion),
+    Status201_VersionCommitted {
+        body: models::DocumentVersion,
+        x_request_id: Option<uuid::Uuid>,
+    },
     /// Error response
-    Status0_ErrorResponse(models::V1DocumentsGetDefaultResponse),
+    Status400_ErrorResponse {
+        body: models::V1DocumentsGet400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
+    /// Unauthorized
+    Status401_Unauthorized {
+        body: models::V1DocumentsGet400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
+    /// Forbidden
+    Status403_Forbidden {
+        body: models::V1DocumentsGet400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
+    /// Not Found
+    Status404_NotFound {
+        body: models::V1DocumentsGet400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
+    /// Conflict
+    Status409_Conflict {
+        body: models::V1DocumentsGet400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
+    /// Unprocessable Entity
+    Status422_UnprocessableEntity {
+        body: models::V1DocumentsGet400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
+    /// Internal Server Error
+    Status500_InternalServerError {
+        body: models::V1DocumentsGet400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -33,9 +95,30 @@ pub enum V1DocumentsDocumentIdVersionsPostResponse {
 #[allow(clippy::large_enum_variant)]
 pub enum V1DocumentsGetResponse {
     /// OK
-    Status200_OK(models::DocumentList),
+    Status200_OK {
+        body: models::DocumentList,
+        x_request_id: Option<uuid::Uuid>,
+    },
     /// Error response
-    Status0_ErrorResponse(models::V1DocumentsGetDefaultResponse),
+    Status400_ErrorResponse {
+        body: models::V1DocumentsGet400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
+    /// Unauthorized
+    Status401_Unauthorized {
+        body: models::V1DocumentsGet400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
+    /// Forbidden
+    Status403_Forbidden {
+        body: models::V1DocumentsGet400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
+    /// Internal Server Error
+    Status500_InternalServerError {
+        body: models::V1DocumentsGet400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -43,9 +126,35 @@ pub enum V1DocumentsGetResponse {
 #[allow(clippy::large_enum_variant)]
 pub enum V1DocumentsPostResponse {
     /// Init OK
-    Status201_InitOK(models::DocumentInitResponse),
+    Status201_InitOK {
+        body: models::DocumentInitResponse,
+        x_request_id: Option<uuid::Uuid>,
+    },
     /// Error response
-    Status0_ErrorResponse(models::V1DocumentsGetDefaultResponse),
+    Status400_ErrorResponse {
+        body: models::V1DocumentsGet400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
+    /// Unauthorized
+    Status401_Unauthorized {
+        body: models::V1DocumentsGet400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
+    /// Forbidden
+    Status403_Forbidden {
+        body: models::V1DocumentsGet400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
+    /// Unprocessable Entity
+    Status422_UnprocessableEntity {
+        body: models::V1DocumentsGet400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
+    /// Internal Server Error
+    Status500_InternalServerError {
+        body: models::V1DocumentsGet400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
 }
 
 /// Documents

@@ -2177,7 +2177,7 @@ impl std::convert::TryFrom<HeaderValue> for header::IntoHeaderValue<V1PeopleGet2
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, validator::Validate)]
 #[cfg_attr(feature = "conversion", derive(frunk::LabelledGeneric))]
-pub struct V1PeopleGetDefaultResponse {
+pub struct V1PeopleGet400Response {
     #[serde(rename = "type")]
     #[validate(custom(function = "check_xss_string"))]
     pub r_type: String,
@@ -2210,10 +2210,10 @@ pub struct V1PeopleGetDefaultResponse {
     pub r_errors: Option<std::collections::HashMap<String, Vec<String>>>,
 }
 
-impl V1PeopleGetDefaultResponse {
+impl V1PeopleGet400Response {
     #[allow(clippy::new_without_default, clippy::too_many_arguments)]
-    pub fn new(r_type: String, title: String, status: u16) -> V1PeopleGetDefaultResponse {
-        V1PeopleGetDefaultResponse {
+    pub fn new(r_type: String, title: String, status: u16) -> V1PeopleGet400Response {
+        V1PeopleGet400Response {
             r_type,
             title,
             status,
@@ -2225,10 +2225,10 @@ impl V1PeopleGetDefaultResponse {
     }
 }
 
-/// Converts the V1PeopleGetDefaultResponse value to the Query Parameters representation (style=form, explode=false)
+/// Converts the V1PeopleGet400Response value to the Query Parameters representation (style=form, explode=false)
 /// specified in https://swagger.io/docs/specification/serialization/
 /// Should be implemented in a serde serializer
-impl std::fmt::Display for V1PeopleGetDefaultResponse {
+impl std::fmt::Display for V1PeopleGet400Response {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let params: Vec<Option<String>> = vec![
             Some("type".to_string()),
@@ -2257,10 +2257,10 @@ impl std::fmt::Display for V1PeopleGetDefaultResponse {
     }
 }
 
-/// Converts Query Parameters representation (style=form, explode=false) to a V1PeopleGetDefaultResponse value
+/// Converts Query Parameters representation (style=form, explode=false) to a V1PeopleGet400Response value
 /// as specified in https://swagger.io/docs/specification/serialization/
 /// Should be implemented in a serde deserializer
-impl std::str::FromStr for V1PeopleGetDefaultResponse {
+impl std::str::FromStr for V1PeopleGet400Response {
     type Err = String;
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
@@ -2288,7 +2288,7 @@ impl std::str::FromStr for V1PeopleGetDefaultResponse {
                 Some(x) => x,
                 None => {
                     return std::result::Result::Err(
-                        "Missing value while parsing V1PeopleGetDefaultResponse".to_string(),
+                        "Missing value while parsing V1PeopleGet400Response".to_string(),
                     )
                 }
             };
@@ -2308,8 +2308,8 @@ impl std::str::FromStr for V1PeopleGetDefaultResponse {
                     "instance" => intermediate_rep.instance.push(<String as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?),
                     #[allow(clippy::redundant_clone)]
                     "request_id" => intermediate_rep.request_id.push(<uuid::Uuid as std::str::FromStr>::from_str(val).map_err(|x| x.to_string())?),
-                    "errors" => return std::result::Result::Err("Parsing a container in this style is not supported in V1PeopleGetDefaultResponse".to_string()),
-                    _ => return std::result::Result::Err("Unexpected key while parsing V1PeopleGetDefaultResponse".to_string())
+                    "errors" => return std::result::Result::Err("Parsing a container in this style is not supported in V1PeopleGet400Response".to_string()),
+                    _ => return std::result::Result::Err("Unexpected key while parsing V1PeopleGet400Response".to_string())
                 }
             }
 
@@ -2318,22 +2318,22 @@ impl std::str::FromStr for V1PeopleGetDefaultResponse {
         }
 
         // Use the intermediate representation to return the struct
-        std::result::Result::Ok(V1PeopleGetDefaultResponse {
+        std::result::Result::Ok(V1PeopleGet400Response {
             r_type: intermediate_rep
                 .r_type
                 .into_iter()
                 .next()
-                .ok_or_else(|| "type missing in V1PeopleGetDefaultResponse".to_string())?,
+                .ok_or_else(|| "type missing in V1PeopleGet400Response".to_string())?,
             title: intermediate_rep
                 .title
                 .into_iter()
                 .next()
-                .ok_or_else(|| "title missing in V1PeopleGetDefaultResponse".to_string())?,
+                .ok_or_else(|| "title missing in V1PeopleGet400Response".to_string())?,
             status: intermediate_rep
                 .status
                 .into_iter()
                 .next()
-                .ok_or_else(|| "status missing in V1PeopleGetDefaultResponse".to_string())?,
+                .ok_or_else(|| "status missing in V1PeopleGet400Response".to_string())?,
             detail: intermediate_rep.detail.into_iter().next(),
             instance: intermediate_rep.instance.into_iter().next(),
             request_id: intermediate_rep.request_id.into_iter().next(),
@@ -2342,38 +2342,38 @@ impl std::str::FromStr for V1PeopleGetDefaultResponse {
     }
 }
 
-// Methods for converting between header::IntoHeaderValue<V1PeopleGetDefaultResponse> and HeaderValue
+// Methods for converting between header::IntoHeaderValue<V1PeopleGet400Response> and HeaderValue
 
 #[cfg(feature = "server")]
-impl std::convert::TryFrom<header::IntoHeaderValue<V1PeopleGetDefaultResponse>> for HeaderValue {
+impl std::convert::TryFrom<header::IntoHeaderValue<V1PeopleGet400Response>> for HeaderValue {
     type Error = String;
 
     fn try_from(
-        hdr_value: header::IntoHeaderValue<V1PeopleGetDefaultResponse>,
+        hdr_value: header::IntoHeaderValue<V1PeopleGet400Response>,
     ) -> std::result::Result<Self, Self::Error> {
         let hdr_value = hdr_value.to_string();
         match HeaderValue::from_str(&hdr_value) {
             std::result::Result::Ok(value) => std::result::Result::Ok(value),
             std::result::Result::Err(e) => std::result::Result::Err(format!(
-                r#"Invalid header value for V1PeopleGetDefaultResponse - value: {hdr_value} is invalid {e}"#
+                r#"Invalid header value for V1PeopleGet400Response - value: {hdr_value} is invalid {e}"#
             )),
         }
     }
 }
 
 #[cfg(feature = "server")]
-impl std::convert::TryFrom<HeaderValue> for header::IntoHeaderValue<V1PeopleGetDefaultResponse> {
+impl std::convert::TryFrom<HeaderValue> for header::IntoHeaderValue<V1PeopleGet400Response> {
     type Error = String;
 
     fn try_from(hdr_value: HeaderValue) -> std::result::Result<Self, Self::Error> {
         match hdr_value.to_str() {
             std::result::Result::Ok(value) => {
-                match <V1PeopleGetDefaultResponse as std::str::FromStr>::from_str(value) {
+                match <V1PeopleGet400Response as std::str::FromStr>::from_str(value) {
                     std::result::Result::Ok(value) => {
                         std::result::Result::Ok(header::IntoHeaderValue(value))
                     }
                     std::result::Result::Err(err) => std::result::Result::Err(format!(
-                        r#"Unable to convert header value '{value}' into V1PeopleGetDefaultResponse - {err}"#
+                        r#"Unable to convert header value '{value}' into V1PeopleGet400Response - {err}"#
                     )),
                 }
             }

@@ -106,7 +106,26 @@ where
 
     let resp = match result {
         Ok(rsp) => match rsp {
-            apis::documents::V1DocumentsDocumentIdGetResponse::Status200_OK(body) => {
+            apis::documents::V1DocumentsDocumentIdGetResponse::Status200_OK {
+                body,
+                x_request_id,
+            } => {
+                if let Some(x_request_id) = x_request_id {
+                    let x_request_id = match header::IntoHeaderValue(x_request_id).try_into() {
+                        Ok(val) => val,
+                        Err(e) => {
+                            return Response::builder()
+                                                                    .status(StatusCode::INTERNAL_SERVER_ERROR)
+                                                                    .body(Body::from(format!("An internal server error occurred handling x_request_id header - {e}"))).map_err(|e| { error!(error = ?e); StatusCode::INTERNAL_SERVER_ERROR });
+                        }
+                    };
+
+                    {
+                        let mut response_headers = response.headers_mut().unwrap();
+                        response_headers
+                            .insert(HeaderName::from_static("x-request-id"), x_request_id);
+                    }
+                }
                 let mut response = response.status(200);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
@@ -124,8 +143,183 @@ where
                 .unwrap()?;
                 response.body(Body::from(body_content))
             }
-            apis::documents::V1DocumentsDocumentIdGetResponse::Status0_ErrorResponse(body) => {
-                let mut response = response.status(0);
+            apis::documents::V1DocumentsDocumentIdGetResponse::Status400_ErrorResponse {
+                body,
+                x_request_id,
+            } => {
+                if let Some(x_request_id) = x_request_id {
+                    let x_request_id = match header::IntoHeaderValue(x_request_id).try_into() {
+                        Ok(val) => val,
+                        Err(e) => {
+                            return Response::builder()
+                                                                    .status(StatusCode::INTERNAL_SERVER_ERROR)
+                                                                    .body(Body::from(format!("An internal server error occurred handling x_request_id header - {e}"))).map_err(|e| { error!(error = ?e); StatusCode::INTERNAL_SERVER_ERROR });
+                        }
+                    };
+
+                    {
+                        let mut response_headers = response.headers_mut().unwrap();
+                        response_headers
+                            .insert(HeaderName::from_static("x-request-id"), x_request_id);
+                    }
+                }
+                let mut response = response.status(400);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(
+                        CONTENT_TYPE,
+                        HeaderValue::from_static("application/problem+json"),
+                    );
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::documents::V1DocumentsDocumentIdGetResponse::Status401_Unauthorized {
+                body,
+                x_request_id,
+            } => {
+                if let Some(x_request_id) = x_request_id {
+                    let x_request_id = match header::IntoHeaderValue(x_request_id).try_into() {
+                        Ok(val) => val,
+                        Err(e) => {
+                            return Response::builder()
+                                                                    .status(StatusCode::INTERNAL_SERVER_ERROR)
+                                                                    .body(Body::from(format!("An internal server error occurred handling x_request_id header - {e}"))).map_err(|e| { error!(error = ?e); StatusCode::INTERNAL_SERVER_ERROR });
+                        }
+                    };
+
+                    {
+                        let mut response_headers = response.headers_mut().unwrap();
+                        response_headers
+                            .insert(HeaderName::from_static("x-request-id"), x_request_id);
+                    }
+                }
+                let mut response = response.status(401);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(
+                        CONTENT_TYPE,
+                        HeaderValue::from_static("application/problem+json"),
+                    );
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::documents::V1DocumentsDocumentIdGetResponse::Status403_Forbidden {
+                body,
+                x_request_id,
+            } => {
+                if let Some(x_request_id) = x_request_id {
+                    let x_request_id = match header::IntoHeaderValue(x_request_id).try_into() {
+                        Ok(val) => val,
+                        Err(e) => {
+                            return Response::builder()
+                                                                    .status(StatusCode::INTERNAL_SERVER_ERROR)
+                                                                    .body(Body::from(format!("An internal server error occurred handling x_request_id header - {e}"))).map_err(|e| { error!(error = ?e); StatusCode::INTERNAL_SERVER_ERROR });
+                        }
+                    };
+
+                    {
+                        let mut response_headers = response.headers_mut().unwrap();
+                        response_headers
+                            .insert(HeaderName::from_static("x-request-id"), x_request_id);
+                    }
+                }
+                let mut response = response.status(403);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(
+                        CONTENT_TYPE,
+                        HeaderValue::from_static("application/problem+json"),
+                    );
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::documents::V1DocumentsDocumentIdGetResponse::Status404_NotFound {
+                body,
+                x_request_id,
+            } => {
+                if let Some(x_request_id) = x_request_id {
+                    let x_request_id = match header::IntoHeaderValue(x_request_id).try_into() {
+                        Ok(val) => val,
+                        Err(e) => {
+                            return Response::builder()
+                                                                    .status(StatusCode::INTERNAL_SERVER_ERROR)
+                                                                    .body(Body::from(format!("An internal server error occurred handling x_request_id header - {e}"))).map_err(|e| { error!(error = ?e); StatusCode::INTERNAL_SERVER_ERROR });
+                        }
+                    };
+
+                    {
+                        let mut response_headers = response.headers_mut().unwrap();
+                        response_headers
+                            .insert(HeaderName::from_static("x-request-id"), x_request_id);
+                    }
+                }
+                let mut response = response.status(404);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(
+                        CONTENT_TYPE,
+                        HeaderValue::from_static("application/problem+json"),
+                    );
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::documents::V1DocumentsDocumentIdGetResponse::Status500_InternalServerError {
+                body,
+                x_request_id,
+            } => {
+                if let Some(x_request_id) = x_request_id {
+                    let x_request_id = match header::IntoHeaderValue(x_request_id).try_into() {
+                        Ok(val) => val,
+                        Err(e) => {
+                            return Response::builder()
+                                                                    .status(StatusCode::INTERNAL_SERVER_ERROR)
+                                                                    .body(Body::from(format!("An internal server error occurred handling x_request_id header - {e}"))).map_err(|e| { error!(error = ?e); StatusCode::INTERNAL_SERVER_ERROR });
+                        }
+                    };
+
+                    {
+                        let mut response_headers = response.headers_mut().unwrap();
+                        response_headers
+                            .insert(HeaderName::from_static("x-request-id"), x_request_id);
+                    }
+                }
+                let mut response = response.status(500);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
                     response_headers.insert(
@@ -245,8 +439,30 @@ where
     let resp = match result {
                                             Ok(rsp) => match rsp {
                                                 apis::documents::V1DocumentsDocumentIdVersionsPostResponse::Status201_VersionCommitted
-                                                    (body)
+                                                    {
+                                                        body,
+                                                        x_request_id
+                                                    }
                                                 => {
+                                                    if let Some(x_request_id) = x_request_id {
+                                                    let x_request_id = match header::IntoHeaderValue(x_request_id).try_into() {
+                                                        Ok(val) => val,
+                                                        Err(e) => {
+                                                            return Response::builder()
+                                                                    .status(StatusCode::INTERNAL_SERVER_ERROR)
+                                                                    .body(Body::from(format!("An internal server error occurred handling x_request_id header - {e}"))).map_err(|e| { error!(error = ?e); StatusCode::INTERNAL_SERVER_ERROR });
+                                                        }
+                                                    };
+
+
+                                                    {
+                                                      let mut response_headers = response.headers_mut().unwrap();
+                                                      response_headers.insert(
+                                                          HeaderName::from_static("x-request-id"),
+                                                          x_request_id
+                                                      );
+                                                    }
+                                                    }
                                                   let mut response = response.status(201);
                                                   {
                                                     let mut response_headers = response.headers_mut().unwrap();
@@ -262,10 +478,272 @@ where
                                                       })).await.unwrap()?;
                                                   response.body(Body::from(body_content))
                                                 },
-                                                apis::documents::V1DocumentsDocumentIdVersionsPostResponse::Status0_ErrorResponse
-                                                    (body)
+                                                apis::documents::V1DocumentsDocumentIdVersionsPostResponse::Status400_ErrorResponse
+                                                    {
+                                                        body,
+                                                        x_request_id
+                                                    }
                                                 => {
-                                                  let mut response = response.status(0);
+                                                    if let Some(x_request_id) = x_request_id {
+                                                    let x_request_id = match header::IntoHeaderValue(x_request_id).try_into() {
+                                                        Ok(val) => val,
+                                                        Err(e) => {
+                                                            return Response::builder()
+                                                                    .status(StatusCode::INTERNAL_SERVER_ERROR)
+                                                                    .body(Body::from(format!("An internal server error occurred handling x_request_id header - {e}"))).map_err(|e| { error!(error = ?e); StatusCode::INTERNAL_SERVER_ERROR });
+                                                        }
+                                                    };
+
+
+                                                    {
+                                                      let mut response_headers = response.headers_mut().unwrap();
+                                                      response_headers.insert(
+                                                          HeaderName::from_static("x-request-id"),
+                                                          x_request_id
+                                                      );
+                                                    }
+                                                    }
+                                                  let mut response = response.status(400);
+                                                  {
+                                                    let mut response_headers = response.headers_mut().unwrap();
+                                                    response_headers.insert(
+                                                        CONTENT_TYPE,
+                                                        HeaderValue::from_static("application/problem+json"));
+                                                  }
+
+                                                  let body_content =  tokio::task::spawn_blocking(move ||
+                                                      serde_json::to_vec(&body).map_err(|e| {
+                                                        error!(error = ?e);
+                                                        StatusCode::INTERNAL_SERVER_ERROR
+                                                      })).await.unwrap()?;
+                                                  response.body(Body::from(body_content))
+                                                },
+                                                apis::documents::V1DocumentsDocumentIdVersionsPostResponse::Status401_Unauthorized
+                                                    {
+                                                        body,
+                                                        x_request_id
+                                                    }
+                                                => {
+                                                    if let Some(x_request_id) = x_request_id {
+                                                    let x_request_id = match header::IntoHeaderValue(x_request_id).try_into() {
+                                                        Ok(val) => val,
+                                                        Err(e) => {
+                                                            return Response::builder()
+                                                                    .status(StatusCode::INTERNAL_SERVER_ERROR)
+                                                                    .body(Body::from(format!("An internal server error occurred handling x_request_id header - {e}"))).map_err(|e| { error!(error = ?e); StatusCode::INTERNAL_SERVER_ERROR });
+                                                        }
+                                                    };
+
+
+                                                    {
+                                                      let mut response_headers = response.headers_mut().unwrap();
+                                                      response_headers.insert(
+                                                          HeaderName::from_static("x-request-id"),
+                                                          x_request_id
+                                                      );
+                                                    }
+                                                    }
+                                                  let mut response = response.status(401);
+                                                  {
+                                                    let mut response_headers = response.headers_mut().unwrap();
+                                                    response_headers.insert(
+                                                        CONTENT_TYPE,
+                                                        HeaderValue::from_static("application/problem+json"));
+                                                  }
+
+                                                  let body_content =  tokio::task::spawn_blocking(move ||
+                                                      serde_json::to_vec(&body).map_err(|e| {
+                                                        error!(error = ?e);
+                                                        StatusCode::INTERNAL_SERVER_ERROR
+                                                      })).await.unwrap()?;
+                                                  response.body(Body::from(body_content))
+                                                },
+                                                apis::documents::V1DocumentsDocumentIdVersionsPostResponse::Status403_Forbidden
+                                                    {
+                                                        body,
+                                                        x_request_id
+                                                    }
+                                                => {
+                                                    if let Some(x_request_id) = x_request_id {
+                                                    let x_request_id = match header::IntoHeaderValue(x_request_id).try_into() {
+                                                        Ok(val) => val,
+                                                        Err(e) => {
+                                                            return Response::builder()
+                                                                    .status(StatusCode::INTERNAL_SERVER_ERROR)
+                                                                    .body(Body::from(format!("An internal server error occurred handling x_request_id header - {e}"))).map_err(|e| { error!(error = ?e); StatusCode::INTERNAL_SERVER_ERROR });
+                                                        }
+                                                    };
+
+
+                                                    {
+                                                      let mut response_headers = response.headers_mut().unwrap();
+                                                      response_headers.insert(
+                                                          HeaderName::from_static("x-request-id"),
+                                                          x_request_id
+                                                      );
+                                                    }
+                                                    }
+                                                  let mut response = response.status(403);
+                                                  {
+                                                    let mut response_headers = response.headers_mut().unwrap();
+                                                    response_headers.insert(
+                                                        CONTENT_TYPE,
+                                                        HeaderValue::from_static("application/problem+json"));
+                                                  }
+
+                                                  let body_content =  tokio::task::spawn_blocking(move ||
+                                                      serde_json::to_vec(&body).map_err(|e| {
+                                                        error!(error = ?e);
+                                                        StatusCode::INTERNAL_SERVER_ERROR
+                                                      })).await.unwrap()?;
+                                                  response.body(Body::from(body_content))
+                                                },
+                                                apis::documents::V1DocumentsDocumentIdVersionsPostResponse::Status404_NotFound
+                                                    {
+                                                        body,
+                                                        x_request_id
+                                                    }
+                                                => {
+                                                    if let Some(x_request_id) = x_request_id {
+                                                    let x_request_id = match header::IntoHeaderValue(x_request_id).try_into() {
+                                                        Ok(val) => val,
+                                                        Err(e) => {
+                                                            return Response::builder()
+                                                                    .status(StatusCode::INTERNAL_SERVER_ERROR)
+                                                                    .body(Body::from(format!("An internal server error occurred handling x_request_id header - {e}"))).map_err(|e| { error!(error = ?e); StatusCode::INTERNAL_SERVER_ERROR });
+                                                        }
+                                                    };
+
+
+                                                    {
+                                                      let mut response_headers = response.headers_mut().unwrap();
+                                                      response_headers.insert(
+                                                          HeaderName::from_static("x-request-id"),
+                                                          x_request_id
+                                                      );
+                                                    }
+                                                    }
+                                                  let mut response = response.status(404);
+                                                  {
+                                                    let mut response_headers = response.headers_mut().unwrap();
+                                                    response_headers.insert(
+                                                        CONTENT_TYPE,
+                                                        HeaderValue::from_static("application/problem+json"));
+                                                  }
+
+                                                  let body_content =  tokio::task::spawn_blocking(move ||
+                                                      serde_json::to_vec(&body).map_err(|e| {
+                                                        error!(error = ?e);
+                                                        StatusCode::INTERNAL_SERVER_ERROR
+                                                      })).await.unwrap()?;
+                                                  response.body(Body::from(body_content))
+                                                },
+                                                apis::documents::V1DocumentsDocumentIdVersionsPostResponse::Status409_Conflict
+                                                    {
+                                                        body,
+                                                        x_request_id
+                                                    }
+                                                => {
+                                                    if let Some(x_request_id) = x_request_id {
+                                                    let x_request_id = match header::IntoHeaderValue(x_request_id).try_into() {
+                                                        Ok(val) => val,
+                                                        Err(e) => {
+                                                            return Response::builder()
+                                                                    .status(StatusCode::INTERNAL_SERVER_ERROR)
+                                                                    .body(Body::from(format!("An internal server error occurred handling x_request_id header - {e}"))).map_err(|e| { error!(error = ?e); StatusCode::INTERNAL_SERVER_ERROR });
+                                                        }
+                                                    };
+
+
+                                                    {
+                                                      let mut response_headers = response.headers_mut().unwrap();
+                                                      response_headers.insert(
+                                                          HeaderName::from_static("x-request-id"),
+                                                          x_request_id
+                                                      );
+                                                    }
+                                                    }
+                                                  let mut response = response.status(409);
+                                                  {
+                                                    let mut response_headers = response.headers_mut().unwrap();
+                                                    response_headers.insert(
+                                                        CONTENT_TYPE,
+                                                        HeaderValue::from_static("application/problem+json"));
+                                                  }
+
+                                                  let body_content =  tokio::task::spawn_blocking(move ||
+                                                      serde_json::to_vec(&body).map_err(|e| {
+                                                        error!(error = ?e);
+                                                        StatusCode::INTERNAL_SERVER_ERROR
+                                                      })).await.unwrap()?;
+                                                  response.body(Body::from(body_content))
+                                                },
+                                                apis::documents::V1DocumentsDocumentIdVersionsPostResponse::Status422_UnprocessableEntity
+                                                    {
+                                                        body,
+                                                        x_request_id
+                                                    }
+                                                => {
+                                                    if let Some(x_request_id) = x_request_id {
+                                                    let x_request_id = match header::IntoHeaderValue(x_request_id).try_into() {
+                                                        Ok(val) => val,
+                                                        Err(e) => {
+                                                            return Response::builder()
+                                                                    .status(StatusCode::INTERNAL_SERVER_ERROR)
+                                                                    .body(Body::from(format!("An internal server error occurred handling x_request_id header - {e}"))).map_err(|e| { error!(error = ?e); StatusCode::INTERNAL_SERVER_ERROR });
+                                                        }
+                                                    };
+
+
+                                                    {
+                                                      let mut response_headers = response.headers_mut().unwrap();
+                                                      response_headers.insert(
+                                                          HeaderName::from_static("x-request-id"),
+                                                          x_request_id
+                                                      );
+                                                    }
+                                                    }
+                                                  let mut response = response.status(422);
+                                                  {
+                                                    let mut response_headers = response.headers_mut().unwrap();
+                                                    response_headers.insert(
+                                                        CONTENT_TYPE,
+                                                        HeaderValue::from_static("application/problem+json"));
+                                                  }
+
+                                                  let body_content =  tokio::task::spawn_blocking(move ||
+                                                      serde_json::to_vec(&body).map_err(|e| {
+                                                        error!(error = ?e);
+                                                        StatusCode::INTERNAL_SERVER_ERROR
+                                                      })).await.unwrap()?;
+                                                  response.body(Body::from(body_content))
+                                                },
+                                                apis::documents::V1DocumentsDocumentIdVersionsPostResponse::Status500_InternalServerError
+                                                    {
+                                                        body,
+                                                        x_request_id
+                                                    }
+                                                => {
+                                                    if let Some(x_request_id) = x_request_id {
+                                                    let x_request_id = match header::IntoHeaderValue(x_request_id).try_into() {
+                                                        Ok(val) => val,
+                                                        Err(e) => {
+                                                            return Response::builder()
+                                                                    .status(StatusCode::INTERNAL_SERVER_ERROR)
+                                                                    .body(Body::from(format!("An internal server error occurred handling x_request_id header - {e}"))).map_err(|e| { error!(error = ?e); StatusCode::INTERNAL_SERVER_ERROR });
+                                                        }
+                                                    };
+
+
+                                                    {
+                                                      let mut response_headers = response.headers_mut().unwrap();
+                                                      response_headers.insert(
+                                                          HeaderName::from_static("x-request-id"),
+                                                          x_request_id
+                                                      );
+                                                    }
+                                                    }
+                                                  let mut response = response.status(500);
                                                   {
                                                     let mut response_headers = response.headers_mut().unwrap();
                                                     response_headers.insert(
@@ -350,7 +828,23 @@ where
 
     let resp = match result {
         Ok(rsp) => match rsp {
-            apis::documents::V1DocumentsGetResponse::Status200_OK(body) => {
+            apis::documents::V1DocumentsGetResponse::Status200_OK { body, x_request_id } => {
+                if let Some(x_request_id) = x_request_id {
+                    let x_request_id = match header::IntoHeaderValue(x_request_id).try_into() {
+                        Ok(val) => val,
+                        Err(e) => {
+                            return Response::builder()
+                                                                    .status(StatusCode::INTERNAL_SERVER_ERROR)
+                                                                    .body(Body::from(format!("An internal server error occurred handling x_request_id header - {e}"))).map_err(|e| { error!(error = ?e); StatusCode::INTERNAL_SERVER_ERROR });
+                        }
+                    };
+
+                    {
+                        let mut response_headers = response.headers_mut().unwrap();
+                        response_headers
+                            .insert(HeaderName::from_static("x-request-id"), x_request_id);
+                    }
+                }
                 let mut response = response.status(200);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
@@ -368,8 +862,141 @@ where
                 .unwrap()?;
                 response.body(Body::from(body_content))
             }
-            apis::documents::V1DocumentsGetResponse::Status0_ErrorResponse(body) => {
-                let mut response = response.status(0);
+            apis::documents::V1DocumentsGetResponse::Status400_ErrorResponse {
+                body,
+                x_request_id,
+            } => {
+                if let Some(x_request_id) = x_request_id {
+                    let x_request_id = match header::IntoHeaderValue(x_request_id).try_into() {
+                        Ok(val) => val,
+                        Err(e) => {
+                            return Response::builder()
+                                                                    .status(StatusCode::INTERNAL_SERVER_ERROR)
+                                                                    .body(Body::from(format!("An internal server error occurred handling x_request_id header - {e}"))).map_err(|e| { error!(error = ?e); StatusCode::INTERNAL_SERVER_ERROR });
+                        }
+                    };
+
+                    {
+                        let mut response_headers = response.headers_mut().unwrap();
+                        response_headers
+                            .insert(HeaderName::from_static("x-request-id"), x_request_id);
+                    }
+                }
+                let mut response = response.status(400);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(
+                        CONTENT_TYPE,
+                        HeaderValue::from_static("application/problem+json"),
+                    );
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::documents::V1DocumentsGetResponse::Status401_Unauthorized {
+                body,
+                x_request_id,
+            } => {
+                if let Some(x_request_id) = x_request_id {
+                    let x_request_id = match header::IntoHeaderValue(x_request_id).try_into() {
+                        Ok(val) => val,
+                        Err(e) => {
+                            return Response::builder()
+                                                                    .status(StatusCode::INTERNAL_SERVER_ERROR)
+                                                                    .body(Body::from(format!("An internal server error occurred handling x_request_id header - {e}"))).map_err(|e| { error!(error = ?e); StatusCode::INTERNAL_SERVER_ERROR });
+                        }
+                    };
+
+                    {
+                        let mut response_headers = response.headers_mut().unwrap();
+                        response_headers
+                            .insert(HeaderName::from_static("x-request-id"), x_request_id);
+                    }
+                }
+                let mut response = response.status(401);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(
+                        CONTENT_TYPE,
+                        HeaderValue::from_static("application/problem+json"),
+                    );
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::documents::V1DocumentsGetResponse::Status403_Forbidden { body, x_request_id } => {
+                if let Some(x_request_id) = x_request_id {
+                    let x_request_id = match header::IntoHeaderValue(x_request_id).try_into() {
+                        Ok(val) => val,
+                        Err(e) => {
+                            return Response::builder()
+                                                                    .status(StatusCode::INTERNAL_SERVER_ERROR)
+                                                                    .body(Body::from(format!("An internal server error occurred handling x_request_id header - {e}"))).map_err(|e| { error!(error = ?e); StatusCode::INTERNAL_SERVER_ERROR });
+                        }
+                    };
+
+                    {
+                        let mut response_headers = response.headers_mut().unwrap();
+                        response_headers
+                            .insert(HeaderName::from_static("x-request-id"), x_request_id);
+                    }
+                }
+                let mut response = response.status(403);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(
+                        CONTENT_TYPE,
+                        HeaderValue::from_static("application/problem+json"),
+                    );
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::documents::V1DocumentsGetResponse::Status500_InternalServerError {
+                body,
+                x_request_id,
+            } => {
+                if let Some(x_request_id) = x_request_id {
+                    let x_request_id = match header::IntoHeaderValue(x_request_id).try_into() {
+                        Ok(val) => val,
+                        Err(e) => {
+                            return Response::builder()
+                                                                    .status(StatusCode::INTERNAL_SERVER_ERROR)
+                                                                    .body(Body::from(format!("An internal server error occurred handling x_request_id header - {e}"))).map_err(|e| { error!(error = ?e); StatusCode::INTERNAL_SERVER_ERROR });
+                        }
+                    };
+
+                    {
+                        let mut response_headers = response.headers_mut().unwrap();
+                        response_headers
+                            .insert(HeaderName::from_static("x-request-id"), x_request_id);
+                    }
+                }
+                let mut response = response.status(500);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
                     response_headers.insert(
@@ -469,7 +1096,23 @@ where
 
     let resp = match result {
         Ok(rsp) => match rsp {
-            apis::documents::V1DocumentsPostResponse::Status201_InitOK(body) => {
+            apis::documents::V1DocumentsPostResponse::Status201_InitOK { body, x_request_id } => {
+                if let Some(x_request_id) = x_request_id {
+                    let x_request_id = match header::IntoHeaderValue(x_request_id).try_into() {
+                        Ok(val) => val,
+                        Err(e) => {
+                            return Response::builder()
+                                                                    .status(StatusCode::INTERNAL_SERVER_ERROR)
+                                                                    .body(Body::from(format!("An internal server error occurred handling x_request_id header - {e}"))).map_err(|e| { error!(error = ?e); StatusCode::INTERNAL_SERVER_ERROR });
+                        }
+                    };
+
+                    {
+                        let mut response_headers = response.headers_mut().unwrap();
+                        response_headers
+                            .insert(HeaderName::from_static("x-request-id"), x_request_id);
+                    }
+                }
                 let mut response = response.status(201);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
@@ -487,8 +1130,183 @@ where
                 .unwrap()?;
                 response.body(Body::from(body_content))
             }
-            apis::documents::V1DocumentsPostResponse::Status0_ErrorResponse(body) => {
-                let mut response = response.status(0);
+            apis::documents::V1DocumentsPostResponse::Status400_ErrorResponse {
+                body,
+                x_request_id,
+            } => {
+                if let Some(x_request_id) = x_request_id {
+                    let x_request_id = match header::IntoHeaderValue(x_request_id).try_into() {
+                        Ok(val) => val,
+                        Err(e) => {
+                            return Response::builder()
+                                                                    .status(StatusCode::INTERNAL_SERVER_ERROR)
+                                                                    .body(Body::from(format!("An internal server error occurred handling x_request_id header - {e}"))).map_err(|e| { error!(error = ?e); StatusCode::INTERNAL_SERVER_ERROR });
+                        }
+                    };
+
+                    {
+                        let mut response_headers = response.headers_mut().unwrap();
+                        response_headers
+                            .insert(HeaderName::from_static("x-request-id"), x_request_id);
+                    }
+                }
+                let mut response = response.status(400);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(
+                        CONTENT_TYPE,
+                        HeaderValue::from_static("application/problem+json"),
+                    );
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::documents::V1DocumentsPostResponse::Status401_Unauthorized {
+                body,
+                x_request_id,
+            } => {
+                if let Some(x_request_id) = x_request_id {
+                    let x_request_id = match header::IntoHeaderValue(x_request_id).try_into() {
+                        Ok(val) => val,
+                        Err(e) => {
+                            return Response::builder()
+                                                                    .status(StatusCode::INTERNAL_SERVER_ERROR)
+                                                                    .body(Body::from(format!("An internal server error occurred handling x_request_id header - {e}"))).map_err(|e| { error!(error = ?e); StatusCode::INTERNAL_SERVER_ERROR });
+                        }
+                    };
+
+                    {
+                        let mut response_headers = response.headers_mut().unwrap();
+                        response_headers
+                            .insert(HeaderName::from_static("x-request-id"), x_request_id);
+                    }
+                }
+                let mut response = response.status(401);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(
+                        CONTENT_TYPE,
+                        HeaderValue::from_static("application/problem+json"),
+                    );
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::documents::V1DocumentsPostResponse::Status403_Forbidden {
+                body,
+                x_request_id,
+            } => {
+                if let Some(x_request_id) = x_request_id {
+                    let x_request_id = match header::IntoHeaderValue(x_request_id).try_into() {
+                        Ok(val) => val,
+                        Err(e) => {
+                            return Response::builder()
+                                                                    .status(StatusCode::INTERNAL_SERVER_ERROR)
+                                                                    .body(Body::from(format!("An internal server error occurred handling x_request_id header - {e}"))).map_err(|e| { error!(error = ?e); StatusCode::INTERNAL_SERVER_ERROR });
+                        }
+                    };
+
+                    {
+                        let mut response_headers = response.headers_mut().unwrap();
+                        response_headers
+                            .insert(HeaderName::from_static("x-request-id"), x_request_id);
+                    }
+                }
+                let mut response = response.status(403);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(
+                        CONTENT_TYPE,
+                        HeaderValue::from_static("application/problem+json"),
+                    );
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::documents::V1DocumentsPostResponse::Status422_UnprocessableEntity {
+                body,
+                x_request_id,
+            } => {
+                if let Some(x_request_id) = x_request_id {
+                    let x_request_id = match header::IntoHeaderValue(x_request_id).try_into() {
+                        Ok(val) => val,
+                        Err(e) => {
+                            return Response::builder()
+                                                                    .status(StatusCode::INTERNAL_SERVER_ERROR)
+                                                                    .body(Body::from(format!("An internal server error occurred handling x_request_id header - {e}"))).map_err(|e| { error!(error = ?e); StatusCode::INTERNAL_SERVER_ERROR });
+                        }
+                    };
+
+                    {
+                        let mut response_headers = response.headers_mut().unwrap();
+                        response_headers
+                            .insert(HeaderName::from_static("x-request-id"), x_request_id);
+                    }
+                }
+                let mut response = response.status(422);
+                {
+                    let mut response_headers = response.headers_mut().unwrap();
+                    response_headers.insert(
+                        CONTENT_TYPE,
+                        HeaderValue::from_static("application/problem+json"),
+                    );
+                }
+
+                let body_content = tokio::task::spawn_blocking(move || {
+                    serde_json::to_vec(&body).map_err(|e| {
+                        error!(error = ?e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })
+                })
+                .await
+                .unwrap()?;
+                response.body(Body::from(body_content))
+            }
+            apis::documents::V1DocumentsPostResponse::Status500_InternalServerError {
+                body,
+                x_request_id,
+            } => {
+                if let Some(x_request_id) = x_request_id {
+                    let x_request_id = match header::IntoHeaderValue(x_request_id).try_into() {
+                        Ok(val) => val,
+                        Err(e) => {
+                            return Response::builder()
+                                                                    .status(StatusCode::INTERNAL_SERVER_ERROR)
+                                                                    .body(Body::from(format!("An internal server error occurred handling x_request_id header - {e}"))).map_err(|e| { error!(error = ?e); StatusCode::INTERNAL_SERVER_ERROR });
+                        }
+                    };
+
+                    {
+                        let mut response_headers = response.headers_mut().unwrap();
+                        response_headers
+                            .insert(HeaderName::from_static("x-request-id"), x_request_id);
+                    }
+                }
+                let mut response = response.status(500);
                 {
                     let mut response_headers = response.headers_mut().unwrap();
                     response_headers.insert(

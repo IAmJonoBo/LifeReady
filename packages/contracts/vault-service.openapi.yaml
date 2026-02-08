@@ -7,91 +7,159 @@ servers:
   - url: https://api.lifeready.local/vault
 tags:
   - name: documents
+security:
+  - bearerAuth: []
 paths:
   /v1/documents:
     get:
       tags: [documents]
-      security: [{ bearerAuth: [] }]
+      security:
+        - bearerAuth: []
       summary: List document metadata
       parameters:
         - in: query
           name: limit
-          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
       responses:
         "200":
           description: OK
+          headers:
+            X-Request-Id:
+              $ref: "./common.openapi.yaml#/components/headers/X-Request-Id"
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/DocumentList" }
-        default:
-          $ref: "./common.openapi.yaml#/components/responses/ProblemDetails"
+              schema:
+                $ref: "#/components/schemas/DocumentList"
+        "400":
+          $ref: "./common.openapi.yaml#/components/responses/ProblemDetailsResponse"
+        "401":
+          $ref: "./common.openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "./common.openapi.yaml#/components/responses/Forbidden"
+        "500":
+          $ref: "./common.openapi.yaml#/components/responses/ServerError"
     post:
       tags: [documents]
-      security: [{ bearerAuth: [] }]
+      security:
+        - bearerAuth: []
       summary: Init document upload (server returns pre-signed upload target)
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/DocumentInit" }
+            schema:
+              $ref: "#/components/schemas/DocumentInit"
       responses:
         "201":
           description: Init OK
+          headers:
+            X-Request-Id:
+              $ref: "./common.openapi.yaml#/components/headers/X-Request-Id"
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/DocumentInitResponse" }
-        default:
-          $ref: "./common.openapi.yaml#/components/responses/ProblemDetails"
+              schema:
+                $ref: "#/components/schemas/DocumentInitResponse"
+        "400":
+          $ref: "./common.openapi.yaml#/components/responses/ProblemDetailsResponse"
+        "401":
+          $ref: "./common.openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "./common.openapi.yaml#/components/responses/Forbidden"
+        "422":
+          $ref: "./common.openapi.yaml#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "./common.openapi.yaml#/components/responses/ServerError"
   /v1/documents/{document_id}/versions:
     post:
       tags: [documents]
-      security: [{ bearerAuth: [] }]
+      security:
+        - bearerAuth: []
       summary: Commit uploaded version (checksum required)
       parameters:
         - in: path
           name: document_id
           required: true
-          schema: { $ref: "#/components/schemas/Uuid" }
+          schema:
+            $ref: "#/components/schemas/Uuid"
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/DocumentCommit" }
+            schema:
+              $ref: "#/components/schemas/DocumentCommit"
       responses:
         "201":
           description: Version committed
+          headers:
+            X-Request-Id:
+              $ref: "./common.openapi.yaml#/components/headers/X-Request-Id"
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/DocumentVersion" }
-        default:
-          $ref: "./common.openapi.yaml#/components/responses/ProblemDetails"
+              schema:
+                $ref: "#/components/schemas/DocumentVersion"
+        "400":
+          $ref: "./common.openapi.yaml#/components/responses/ProblemDetailsResponse"
+        "401":
+          $ref: "./common.openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "./common.openapi.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "./common.openapi.yaml#/components/responses/NotFound"
+        "409":
+          $ref: "./common.openapi.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "./common.openapi.yaml#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "./common.openapi.yaml#/components/responses/ServerError"
   /v1/documents/{document_id}:
     get:
       tags: [documents]
-      security: [{ bearerAuth: [] }]
+      security:
+        - bearerAuth: []
       summary: Get document metadata
       parameters:
         - in: path
           name: document_id
           required: true
-          schema: { $ref: "#/components/schemas/Uuid" }
+          schema:
+            $ref: "#/components/schemas/Uuid"
       responses:
         "200":
           description: OK
+          headers:
+            X-Request-Id:
+              $ref: "./common.openapi.yaml#/components/headers/X-Request-Id"
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/Document" }
-        default:
-          $ref: "./common.openapi.yaml#/components/responses/ProblemDetails"
+              schema:
+                $ref: "#/components/schemas/Document"
+        "400":
+          $ref: "./common.openapi.yaml#/components/responses/ProblemDetailsResponse"
+        "401":
+          $ref: "./common.openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "./common.openapi.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "./common.openapi.yaml#/components/responses/NotFound"
+        "500":
+          $ref: "./common.openapi.yaml#/components/responses/ServerError"
 components:
   securitySchemes:
-    bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
   schemas:
-    Uuid: { $ref: "./common.openapi.yaml#/components/schemas/Uuid" }
+    Uuid:
+      $ref: "./common.openapi.yaml#/components/schemas/Uuid"
     IsoDateTime:
-      { $ref: "./common.openapi.yaml#/components/schemas/IsoDateTime" }
+      $ref: "./common.openapi.yaml#/components/schemas/IsoDateTime"
     SensitivityTier:
-      { $ref: "./common.openapi.yaml#/components/schemas/SensitivityTier" }
+      $ref: "./common.openapi.yaml#/components/schemas/SensitivityTier"
     DocumentType:
       type: string
       enum:
@@ -112,53 +180,85 @@ components:
       type: object
       required: [document_type, title, sensitivity]
       properties:
-        document_type: { $ref: "#/components/schemas/DocumentType" }
-        title: { type: string, maxLength: 160 }
-        sensitivity: { $ref: "#/components/schemas/SensitivityTier" }
+        document_type:
+          $ref: "#/components/schemas/DocumentType"
+        title:
+          type: string
+          maxLength: 160
+        sensitivity:
+          $ref: "#/components/schemas/SensitivityTier"
         tags:
           type: array
-          items: { type: string, maxLength: 40 }
+          maxItems: 20
+          items:
+            type: string
+            maxLength: 40
     DocumentInitResponse:
       type: object
       required: [document_id, upload_url, upload_headers]
       properties:
-        document_id: { $ref: "#/components/schemas/Uuid" }
-        upload_url: { type: string, format: uri }
+        document_id:
+          $ref: "#/components/schemas/Uuid"
+        upload_url:
+          type: string
+          format: uri
         upload_headers:
           type: object
-          additionalProperties: { type: string }
+          additionalProperties:
+            type: string
     DocumentCommit:
       type: object
       required: [blob_ref, sha256, byte_size, mime_type]
       properties:
-        blob_ref: { type: string, maxLength: 512 }
-        sha256: { $ref: "#/components/schemas/Sha256" }
-        byte_size: { type: integer, minimum: 1, maximum: 52428800 }
-        mime_type: { type: string, maxLength: 80 }
+        blob_ref:
+          type: string
+          maxLength: 512
+        sha256:
+          $ref: "#/components/schemas/Sha256"
+        byte_size:
+          type: integer
+          minimum: 1
+          maximum: 52428800
+        mime_type:
+          type: string
+          maxLength: 80
     DocumentVersion:
       type: object
       required: [document_id, version_id, sha256, created_at]
       properties:
-        document_id: { $ref: "#/components/schemas/Uuid" }
-        version_id: { $ref: "#/components/schemas/Uuid" }
-        sha256: { $ref: "#/components/schemas/Sha256" }
-        created_at: { $ref: "#/components/schemas/IsoDateTime" }
+        document_id:
+          $ref: "#/components/schemas/Uuid"
+        version_id:
+          $ref: "#/components/schemas/Uuid"
+        sha256:
+          $ref: "#/components/schemas/Sha256"
+        created_at:
+          $ref: "#/components/schemas/IsoDateTime"
     Document:
       type: object
       required: [document_id, document_type, title, sensitivity, created_at]
       properties:
-        document_id: { $ref: "#/components/schemas/Uuid" }
-        document_type: { $ref: "#/components/schemas/DocumentType" }
-        title: { type: string }
-        sensitivity: { $ref: "#/components/schemas/SensitivityTier" }
+        document_id:
+          $ref: "#/components/schemas/Uuid"
+        document_type:
+          $ref: "#/components/schemas/DocumentType"
+        title:
+          type: string
+        sensitivity:
+          $ref: "#/components/schemas/SensitivityTier"
         tags:
           type: array
-          items: { type: string }
-        created_at: { $ref: "#/components/schemas/IsoDateTime" }
+          maxItems: 20
+          items:
+            type: string
+        created_at:
+          $ref: "#/components/schemas/IsoDateTime"
     DocumentList:
       type: object
       required: [items]
       properties:
         items:
           type: array
-          items: { $ref: "#/components/schemas/Document" }
+          maxItems: 200
+          items:
+            $ref: "#/components/schemas/Document"

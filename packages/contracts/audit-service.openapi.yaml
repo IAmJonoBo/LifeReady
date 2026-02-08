@@ -7,61 +7,100 @@ servers:
   - url: https://api.lifeready.local/audit
 tags:
   - name: audit
+security:
+  - bearerAuth: []
 paths:
   /v1/audit/events:
     post:
       tags: [audit]
-      security: [{ bearerAuth: [] }]
+      security:
+        - bearerAuth: []
       summary: Append audit event (internal services)
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/AuditAppend" }
+            schema:
+              $ref: "#/components/schemas/AuditAppend"
       responses:
         "201":
           description: Appended
+          headers:
+            X-Request-Id:
+              $ref: "./common.openapi.yaml#/components/headers/X-Request-Id"
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/AuditEvent" }
-        default:
-          $ref: "./common.openapi.yaml#/components/responses/ProblemDetails"
-
+              schema:
+                $ref: "#/components/schemas/AuditEvent"
+        "400":
+          $ref: "./common.openapi.yaml#/components/responses/ProblemDetailsResponse"
+        "401":
+          $ref: "./common.openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "./common.openapi.yaml#/components/responses/Forbidden"
+        "409":
+          $ref: "./common.openapi.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "./common.openapi.yaml#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "./common.openapi.yaml#/components/responses/ServerError"
   /v1/audit/export:
     get:
       tags: [audit]
-      security: [{ bearerAuth: [] }]
+      security:
+        - bearerAuth: []
       summary: Export audit proof bundle (hash head + verification inputs)
       parameters:
         - in: query
           name: case_id
-          schema: { $ref: "#/components/schemas/Uuid" }
+          schema:
+            $ref: "#/components/schemas/Uuid"
       responses:
         "200":
           description: Export ready
+          headers:
+            X-Request-Id:
+              $ref: "./common.openapi.yaml#/components/headers/X-Request-Id"
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/AuditExport" }
-        default:
-          $ref: "./common.openapi.yaml#/components/responses/ProblemDetails"
-
+              schema:
+                $ref: "#/components/schemas/AuditExport"
+        "400":
+          $ref: "./common.openapi.yaml#/components/responses/ProblemDetailsResponse"
+        "401":
+          $ref: "./common.openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "./common.openapi.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "./common.openapi.yaml#/components/responses/NotFound"
+        "500":
+          $ref: "./common.openapi.yaml#/components/responses/ServerError"
 components:
   securitySchemes:
-    bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
   schemas:
-    Uuid: { $ref: "./common.openapi.yaml#/components/schemas/Uuid" }
+    Uuid:
+      $ref: "./common.openapi.yaml#/components/schemas/Uuid"
     IsoDateTime:
-      { $ref: "./common.openapi.yaml#/components/schemas/IsoDateTime" }
+      $ref: "./common.openapi.yaml#/components/schemas/IsoDateTime"
     SensitivityTier:
-      { $ref: "./common.openapi.yaml#/components/schemas/SensitivityTier" }
+      $ref: "./common.openapi.yaml#/components/schemas/SensitivityTier"
     AuditAppend:
       type: object
       required: [actor_principal_id, action, tier, payload]
       properties:
-        actor_principal_id: { $ref: "#/components/schemas/Uuid" }
-        action: { type: string, maxLength: 120 }
-        tier: { $ref: "#/components/schemas/SensitivityTier" }
-        case_id: { $ref: "#/components/schemas/Uuid" }
+        actor_principal_id:
+          $ref: "#/components/schemas/Uuid"
+        action:
+          type: string
+          maxLength: 120
+        tier:
+          $ref: "#/components/schemas/SensitivityTier"
+        case_id:
+          $ref: "#/components/schemas/Uuid"
         payload:
           type: object
           additionalProperties: true
@@ -69,15 +108,28 @@ components:
       type: object
       required: [event_id, created_at, prev_hash, event_hash]
       properties:
-        event_id: { $ref: "#/components/schemas/Uuid" }
-        created_at: { $ref: "#/components/schemas/IsoDateTime" }
-        prev_hash: { type: string, pattern: "^[a-f0-9]{64}$" }
-        event_hash: { type: string, pattern: "^[a-f0-9]{64}$" }
+        event_id:
+          $ref: "#/components/schemas/Uuid"
+        created_at:
+          $ref: "#/components/schemas/IsoDateTime"
+        prev_hash:
+          type: string
+          pattern: "^[a-f0-9]{64}$"
+        event_hash:
+          type: string
+          pattern: "^[a-f0-9]{64}$"
     AuditExport:
       type: object
       required: [download_url, expires_at, head_hash, events_sha256]
       properties:
-        download_url: { type: string, format: uri }
-        expires_at: { $ref: "#/components/schemas/IsoDateTime" }
-        head_hash: { type: string, pattern: "^[a-f0-9]{64}$" }
-        events_sha256: { type: string, pattern: "^[a-f0-9]{64}$" }
+        download_url:
+          type: string
+          format: uri
+        expires_at:
+          $ref: "#/components/schemas/IsoDateTime"
+        head_hash:
+          type: string
+          pattern: "^[a-f0-9]{64}$"
+        events_sha256:
+          type: string
+          pattern: "^[a-f0-9]{64}$"

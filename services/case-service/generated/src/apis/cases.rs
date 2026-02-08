@@ -13,9 +13,45 @@ use crate::{models, types::*};
 #[allow(clippy::large_enum_variant)]
 pub enum V1CasesCaseIdEvidenceSlotNamePutResponse {
     /// Updated
-    Status200_Updated(models::EvidenceSlot),
+    Status200_Updated {
+        body: models::EvidenceSlot,
+        x_request_id: Option<uuid::Uuid>,
+    },
     /// Error response
-    Status0_ErrorResponse(models::V1CasesEmergencyPackPostDefaultResponse),
+    Status400_ErrorResponse {
+        body: models::V1CasesEmergencyPackPost400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
+    /// Unauthorized
+    Status401_Unauthorized {
+        body: models::V1CasesEmergencyPackPost400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
+    /// Forbidden
+    Status403_Forbidden {
+        body: models::V1CasesEmergencyPackPost400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
+    /// Not Found
+    Status404_NotFound {
+        body: models::V1CasesEmergencyPackPost400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
+    /// Conflict
+    Status409_Conflict {
+        body: models::V1CasesEmergencyPackPost400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
+    /// Unprocessable Entity
+    Status422_UnprocessableEntity {
+        body: models::V1CasesEmergencyPackPost400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
+    /// Internal Server Error
+    Status500_InternalServerError {
+        body: models::V1CasesEmergencyPackPost400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -23,9 +59,45 @@ pub enum V1CasesCaseIdEvidenceSlotNamePutResponse {
 #[allow(clippy::large_enum_variant)]
 pub enum V1CasesCaseIdExportPostResponse {
     /// Export ready
-    Status200_ExportReady(models::ExportResponse),
+    Status200_ExportReady {
+        body: models::ExportResponse,
+        x_request_id: Option<uuid::Uuid>,
+    },
     /// Error response
-    Status0_ErrorResponse(models::V1CasesEmergencyPackPostDefaultResponse),
+    Status400_ErrorResponse {
+        body: models::V1CasesEmergencyPackPost400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
+    /// Unauthorized
+    Status401_Unauthorized {
+        body: models::V1CasesEmergencyPackPost400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
+    /// Forbidden
+    Status403_Forbidden {
+        body: models::V1CasesEmergencyPackPost400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
+    /// Not Found
+    Status404_NotFound {
+        body: models::V1CasesEmergencyPackPost400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
+    /// Conflict
+    Status409_Conflict {
+        body: models::V1CasesEmergencyPackPost400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
+    /// Unprocessable Entity
+    Status422_UnprocessableEntity {
+        body: models::V1CasesEmergencyPackPost400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
+    /// Internal Server Error
+    Status500_InternalServerError {
+        body: models::V1CasesEmergencyPackPost400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -33,9 +105,40 @@ pub enum V1CasesCaseIdExportPostResponse {
 #[allow(clippy::large_enum_variant)]
 pub enum V1CasesEmergencyPackPostResponse {
     /// Created
-    Status201_Created(models::Case),
+    Status201_Created {
+        body: models::Case,
+        x_request_id: Option<uuid::Uuid>,
+    },
     /// Error response
-    Status0_ErrorResponse(models::V1CasesEmergencyPackPostDefaultResponse),
+    Status400_ErrorResponse {
+        body: models::V1CasesEmergencyPackPost400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
+    /// Unauthorized
+    Status401_Unauthorized {
+        body: models::V1CasesEmergencyPackPost400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
+    /// Forbidden
+    Status403_Forbidden {
+        body: models::V1CasesEmergencyPackPost400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
+    /// Conflict
+    Status409_Conflict {
+        body: models::V1CasesEmergencyPackPost400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
+    /// Unprocessable Entity
+    Status422_UnprocessableEntity {
+        body: models::V1CasesEmergencyPackPost400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
+    /// Internal Server Error
+    Status500_InternalServerError {
+        body: models::V1CasesEmergencyPackPost400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -43,9 +146,40 @@ pub enum V1CasesEmergencyPackPostResponse {
 #[allow(clippy::large_enum_variant)]
 pub enum V1CasesMhca39PostResponse {
     /// Created
-    Status201_Created(models::Case),
+    Status201_Created {
+        body: models::Case,
+        x_request_id: Option<uuid::Uuid>,
+    },
     /// Error response
-    Status0_ErrorResponse(models::V1CasesEmergencyPackPostDefaultResponse),
+    Status400_ErrorResponse {
+        body: models::V1CasesEmergencyPackPost400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
+    /// Unauthorized
+    Status401_Unauthorized {
+        body: models::V1CasesEmergencyPackPost400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
+    /// Forbidden
+    Status403_Forbidden {
+        body: models::V1CasesEmergencyPackPost400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
+    /// Conflict
+    Status409_Conflict {
+        body: models::V1CasesEmergencyPackPost400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
+    /// Unprocessable Entity
+    Status422_UnprocessableEntity {
+        body: models::V1CasesEmergencyPackPost400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
+    /// Internal Server Error
+    Status500_InternalServerError {
+        body: models::V1CasesEmergencyPackPost400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
 }
 
 /// Cases

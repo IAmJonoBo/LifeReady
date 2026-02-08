@@ -13,9 +13,30 @@ use crate::{models, types::*};
 #[allow(clippy::large_enum_variant)]
 pub enum V1PeopleGetResponse {
     /// OK
-    Status200_OK(models::V1PeopleGet200Response),
+    Status200_OK {
+        body: models::V1PeopleGet200Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
     /// Error response
-    Status0_ErrorResponse(models::V1PeopleGetDefaultResponse),
+    Status400_ErrorResponse {
+        body: models::V1PeopleGet400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
+    /// Unauthorized
+    Status401_Unauthorized {
+        body: models::V1PeopleGet400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
+    /// Forbidden
+    Status403_Forbidden {
+        body: models::V1PeopleGet400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
+    /// Internal Server Error
+    Status500_InternalServerError {
+        body: models::V1PeopleGet400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -23,9 +44,40 @@ pub enum V1PeopleGetResponse {
 #[allow(clippy::large_enum_variant)]
 pub enum V1PeoplePostResponse {
     /// Created
-    Status201_Created(models::Person),
+    Status201_Created {
+        body: models::Person,
+        x_request_id: Option<uuid::Uuid>,
+    },
     /// Error response
-    Status0_ErrorResponse(models::V1PeopleGetDefaultResponse),
+    Status400_ErrorResponse {
+        body: models::V1PeopleGet400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
+    /// Unauthorized
+    Status401_Unauthorized {
+        body: models::V1PeopleGet400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
+    /// Forbidden
+    Status403_Forbidden {
+        body: models::V1PeopleGet400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
+    /// Conflict
+    Status409_Conflict {
+        body: models::V1PeopleGet400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
+    /// Unprocessable Entity
+    Status422_UnprocessableEntity {
+        body: models::V1PeopleGet400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
+    /// Internal Server Error
+    Status500_InternalServerError {
+        body: models::V1PeopleGet400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
 }
 
 /// People

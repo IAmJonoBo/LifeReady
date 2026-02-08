@@ -3,11 +3,24 @@ info:
   title: LifeReady Common Schemas
   version: 0.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
+security:
+  - bearerAuth: []
 components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
   schemas:
-    Uuid: { type: string, format: uuid }
-    RequestId: { type: string, format: uuid }
-    IsoDateTime: { type: string, format: date-time }
+    Uuid:
+      type: string
+      format: uuid
+    RequestId:
+      type: string
+      format: uuid
+    IsoDateTime:
+      type: string
+      format: date-time
     SensitivityTier:
       type: string
       enum: [green, amber, red]
@@ -18,20 +31,98 @@ components:
       type: object
       required: [type, title, status]
       properties:
-        type: { type: string, format: uri }
-        title: { type: string, maxLength: 200 }
-        status: { type: integer, minimum: 100, maximum: 599 }
-        detail: { type: string, maxLength: 2000 }
-        instance: { type: string, format: uri }
-        request_id: { $ref: "#/components/schemas/RequestId" }
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+          maxLength: 200
+        status:
+          type: integer
+          minimum: 100
+          maximum: 599
+        detail:
+          type: string
+          maxLength: 2000
+        instance:
+          type: string
+          format: uri
+        request_id:
+          $ref: "#/components/schemas/RequestId"
         errors:
           type: object
           additionalProperties:
             type: array
-            items: { type: string, maxLength: 200 }
+            maxItems: 20
+            items:
+              type: string
+              maxLength: 200
+  headers:
+    X-Request-Id:
+      description: Request correlation identifier
+      schema:
+        $ref: "#/components/schemas/RequestId"
   responses:
-    ProblemDetails:
+    ProblemDetailsResponse:
       description: Error response
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/X-Request-Id"
       content:
         application/problem+json:
-          schema: { $ref: "#/components/schemas/ProblemDetails" }
+          schema:
+            $ref: "#/components/schemas/ProblemDetails"
+    Unauthorized:
+      description: Unauthorized
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/X-Request-Id"
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ProblemDetails"
+    Forbidden:
+      description: Forbidden
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/X-Request-Id"
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ProblemDetails"
+    NotFound:
+      description: Not Found
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/X-Request-Id"
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ProblemDetails"
+    Conflict:
+      description: Conflict
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/X-Request-Id"
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ProblemDetails"
+    UnprocessableEntity:
+      description: Unprocessable Entity
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/X-Request-Id"
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ProblemDetails"
+    ServerError:
+      description: Internal Server Error
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/X-Request-Id"
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ProblemDetails"

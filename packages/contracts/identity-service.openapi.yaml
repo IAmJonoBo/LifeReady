@@ -8,10 +8,14 @@ servers:
 tags:
   - name: auth
   - name: devices
+security:
+  - bearerAuth: []
 paths:
   /v1/auth/login:
     post:
       tags: [auth]
+      security:
+        - {}
       summary: Start login (passwordless or password)
       requestBody:
         required: true
@@ -22,15 +26,28 @@ paths:
       responses:
         "200":
           description: Challenge created
+          headers:
+            X-Request-Id:
+              $ref: "./common.openapi.yaml#/components/headers/X-Request-Id"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/LoginChallenge"
-        default:
-          $ref: "./common.openapi.yaml#/components/responses/ProblemDetails"
+        "400":
+          $ref: "./common.openapi.yaml#/components/responses/ProblemDetailsResponse"
+        "401":
+          $ref: "./common.openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "./common.openapi.yaml#/components/responses/Forbidden"
+        "422":
+          $ref: "./common.openapi.yaml#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "./common.openapi.yaml#/components/responses/ServerError"
   /v1/auth/mfa/verify:
     post:
       tags: [auth]
+      security:
+        - {}
       summary: Verify MFA challenge
       requestBody:
         required: true
@@ -41,12 +58,23 @@ paths:
       responses:
         "200":
           description: Session issued
+          headers:
+            X-Request-Id:
+              $ref: "./common.openapi.yaml#/components/headers/X-Request-Id"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Session"
-        default:
-          $ref: "./common.openapi.yaml#/components/responses/ProblemDetails"
+        "400":
+          $ref: "./common.openapi.yaml#/components/responses/ProblemDetailsResponse"
+        "401":
+          $ref: "./common.openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "./common.openapi.yaml#/components/responses/Forbidden"
+        "422":
+          $ref: "./common.openapi.yaml#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "./common.openapi.yaml#/components/responses/ServerError"
   /v1/me:
     get:
       tags: [auth]
@@ -56,12 +84,19 @@ paths:
       responses:
         "200":
           description: Current principal profile
+          headers:
+            X-Request-Id:
+              $ref: "./common.openapi.yaml#/components/headers/X-Request-Id"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Me"
-        default:
-          $ref: "./common.openapi.yaml#/components/responses/ProblemDetails"
+        "401":
+          $ref: "./common.openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "./common.openapi.yaml#/components/responses/Forbidden"
+        "500":
+          $ref: "./common.openapi.yaml#/components/responses/ServerError"
 components:
   securitySchemes:
     bearerAuth:
@@ -73,14 +108,16 @@ components:
       type: string
       format: email
       maxLength: 320
-    Uuid: { $ref: "./common.openapi.yaml#/components/schemas/Uuid" }
+    Uuid:
+      $ref: "./common.openapi.yaml#/components/schemas/Uuid"
     IsoDateTime:
-      { $ref: "./common.openapi.yaml#/components/schemas/IsoDateTime" }
+      $ref: "./common.openapi.yaml#/components/schemas/IsoDateTime"
     LoginRequest:
       type: object
       required: [email]
       properties:
-        email: { $ref: "#/components/schemas/Email" }
+        email:
+          $ref: "#/components/schemas/Email"
         password:
           type: string
           minLength: 8
@@ -99,10 +136,13 @@ components:
       type: object
       required: [challenge_id, mfa_required]
       properties:
-        challenge_id: { $ref: "#/components/schemas/Uuid" }
-        mfa_required: { type: boolean }
+        challenge_id:
+          $ref: "#/components/schemas/Uuid"
+        mfa_required:
+          type: boolean
         mfa_methods:
           type: array
+          maxItems: 5
           items:
             type: string
             enum: [totp, weauthn, passkey]
@@ -110,7 +150,8 @@ components:
       type: object
       required: [challenge_id, method, code]
       properties:
-        challenge_id: { $ref: "#/components/schemas/Uuid" }
+        challenge_id:
+          $ref: "#/components/schemas/Uuid"
         method:
           type: string
           enum: [totp, weauthn, passkey]
@@ -122,12 +163,19 @@ components:
       type: object
       required: [access_token, expires_at]
       properties:
-        access_token: { type: string, minLength: 16 }
-        expires_at: { $ref: "#/components/schemas/IsoDateTime" }
+        access_token:
+          type: string
+          minLength: 16
+        expires_at:
+          $ref: "#/components/schemas/IsoDateTime"
     Me:
       type: object
       required: [principal_id, email]
       properties:
-        principal_id: { $ref: "#/components/schemas/Uuid" }
-        email: { $ref: "#/components/schemas/Email" }
-        display_name: { type: string, maxLength: 80 }
+        principal_id:
+          $ref: "#/components/schemas/Uuid"
+        email:
+          $ref: "#/components/schemas/Email"
+        display_name:
+          type: string
+          maxLength: 80

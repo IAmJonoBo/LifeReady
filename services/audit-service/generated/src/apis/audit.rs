@@ -13,9 +13,40 @@ use crate::{models, types::*};
 #[allow(clippy::large_enum_variant)]
 pub enum V1AuditEventsPostResponse {
     /// Appended
-    Status201_Appended(models::AuditEvent),
+    Status201_Appended {
+        body: models::AuditEvent,
+        x_request_id: Option<uuid::Uuid>,
+    },
     /// Error response
-    Status0_ErrorResponse(models::V1AuditEventsPostDefaultResponse),
+    Status400_ErrorResponse {
+        body: models::V1AuditEventsPost400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
+    /// Unauthorized
+    Status401_Unauthorized {
+        body: models::V1AuditEventsPost400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
+    /// Forbidden
+    Status403_Forbidden {
+        body: models::V1AuditEventsPost400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
+    /// Conflict
+    Status409_Conflict {
+        body: models::V1AuditEventsPost400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
+    /// Unprocessable Entity
+    Status422_UnprocessableEntity {
+        body: models::V1AuditEventsPost400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
+    /// Internal Server Error
+    Status500_InternalServerError {
+        body: models::V1AuditEventsPost400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -23,9 +54,35 @@ pub enum V1AuditEventsPostResponse {
 #[allow(clippy::large_enum_variant)]
 pub enum V1AuditExportGetResponse {
     /// Export ready
-    Status200_ExportReady(models::AuditExport),
+    Status200_ExportReady {
+        body: models::AuditExport,
+        x_request_id: Option<uuid::Uuid>,
+    },
     /// Error response
-    Status0_ErrorResponse(models::V1AuditEventsPostDefaultResponse),
+    Status400_ErrorResponse {
+        body: models::V1AuditEventsPost400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
+    /// Unauthorized
+    Status401_Unauthorized {
+        body: models::V1AuditEventsPost400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
+    /// Forbidden
+    Status403_Forbidden {
+        body: models::V1AuditEventsPost400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
+    /// Not Found
+    Status404_NotFound {
+        body: models::V1AuditEventsPost400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
+    /// Internal Server Error
+    Status500_InternalServerError {
+        body: models::V1AuditEventsPost400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
 }
 
 /// Audit

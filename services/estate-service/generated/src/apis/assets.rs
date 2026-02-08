@@ -13,9 +13,40 @@ use crate::{models, types::*};
 #[allow(clippy::large_enum_variant)]
 pub enum V1AssetsPostResponse {
     /// Created
-    Status201_Created(models::Asset),
+    Status201_Created {
+        body: models::Asset,
+        x_request_id: Option<uuid::Uuid>,
+    },
     /// Error response
-    Status0_ErrorResponse(models::V1PeopleGetDefaultResponse),
+    Status400_ErrorResponse {
+        body: models::V1PeopleGet400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
+    /// Unauthorized
+    Status401_Unauthorized {
+        body: models::V1PeopleGet400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
+    /// Forbidden
+    Status403_Forbidden {
+        body: models::V1PeopleGet400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
+    /// Conflict
+    Status409_Conflict {
+        body: models::V1PeopleGet400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
+    /// Unprocessable Entity
+    Status422_UnprocessableEntity {
+        body: models::V1PeopleGet400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
+    /// Internal Server Error
+    Status500_InternalServerError {
+        body: models::V1PeopleGet400Response,
+        x_request_id: Option<uuid::Uuid>,
+    },
 }
 
 /// Assets
