@@ -79,6 +79,38 @@ async fn create_person_allows_valid_token() {
     assert_eq!(response.status(), StatusCode::CREATED);
 }
 
+#[tokio::test]
+async fn create_asset_denies_red_tier_with_amber_token() {
+    unsafe {
+        std::env::set_var("JWT_SECRET", "test-secret");
+    }
+    let app = estate_service::router();
+    let body = serde_json::json!({
+        "category": "property",
+        "label": "Primary residence",
+        "sensitivity": "red"
+    })
+    .to_string();
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/assets")
+                .header("content-type", "application/json")
+                .header(
+                    "authorization",
+                    format!("Bearer {}", test_token_with_tier(SensitivityTier::Amber)),
+                )
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}
+
 fn test_token() -> String {
     let config = AuthConfig::new("test-secret");
     let claims = Claims::new(

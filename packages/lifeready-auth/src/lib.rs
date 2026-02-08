@@ -20,6 +20,29 @@ use tower::{Layer, Service};
 use uuid::Uuid;
 
 pub const REQUEST_ID_HEADER: &str = "x-request-id";
+const DEV_FALLBACK_SECRET: &str = "dev-only-secret-change-me";
+const MIN_JWT_SECRET_LEN: usize = 32;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LifereadyEnv {
+    Dev,
+    Test,
+    Production,
+}
+
+impl LifereadyEnv {
+    pub fn from_env() -> Self {
+        match std::env::var("LIFEREADY_ENV")
+            .unwrap_or_else(|_| "dev".into())
+            .to_lowercase()
+            .as_str()
+        {
+            "production" | "prod" => Self::Production,
+            "test" => Self::Test,
+            _ => Self::Dev,
+        }
+    }
+}
 
 type AxumRequest = Request<Body>;
 type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
@@ -53,6 +76,7 @@ pub enum AccessLevel {
 pub struct Claims {
     pub sub: String,
     pub role: Role,
+    /// Explicit allowlist of sensitivity tiers the principal may access.
     pub tiers: Vec<SensitivityTier>,
     pub access_level: AccessLevel,
     #[serde(default)]
@@ -105,6 +129,18 @@ pub struct AuthConfig {
     leeway_seconds: u64,
 }
 
+impl std::fmt::Debug for AuthConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AuthConfig")
+            .field("encoding_key", &"<redacted>")
+            .field("decoding_key", &"<redacted>")
+            .field("issuer", &self.issuer)
+            .field("audience", &self.audience)
+            .field("leeway_seconds", &self.leeway_seconds)
+            .finish()
+    }
+}
+
 impl AuthConfig {
     pub fn new(secret: impl Into<String>) -> Self {
         let secret = secret.into();
@@ -119,13 +155,45 @@ impl AuthConfig {
         }
     }
 
+    /// Load configuration from environment.
+    ///
+    /// For production safety, prefer [`AuthConfig::from_env_checked`].
     pub fn from_env() -> Self {
-        let secret = match std::env::var("JWT_SECRET") {
-            Ok(secret) => secret,
-            Err(_) => {
-                tracing::warn!("JWT_SECRET not set; using dev-only fallback secret");
-                "dev-only-secret-change-me".to_string()
+        Self::from_env_checked().unwrap_or_else(|e| {
+            panic!("AuthConfig misconfigured: {e:?}");
+        })
+    }
+
+    /// Load configuration from environment with production guardrails.
+    ///
+    /// Rules:
+    /// - LIFEREADY_ENV defaults to "dev".
+    /// - In production, JWT_SECRET must be set, must not equal the dev fallback,
+    ///   and must be at least 32 characters.
+    /// - In dev/test, if JWT_SECRET is missing, a dev-only fallback is used with a loud warning.
+    pub fn from_env_checked() -> Result<Self, AuthError> {
+        let env = LifereadyEnv::from_env();
+
+        let secret_raw = std::env::var("JWT_SECRET").unwrap_or_default();
+        let secret = secret_raw.trim();
+
+        let is_missing = secret.is_empty();
+        let is_dev_fallback = secret == DEV_FALLBACK_SECRET;
+        let is_too_short = secret.len() < MIN_JWT_SECRET_LEN;
+
+        if env == LifereadyEnv::Production {
+            if is_missing || is_dev_fallback || is_too_short {
+                return Err(AuthError::misconfigured(
+                    "Production mode requires JWT_SECRET (>= 32 chars) and it must not be the dev fallback",
+                ));
             }
+        }
+
+        let secret = if is_missing {
+            tracing::warn!("JWT_SECRET not set; using dev-only fallback secret (dev/test only)");
+            DEV_FALLBACK_SECRET.to_string()
+        } else {
+            secret.to_string()
         };
 
         let mut config = Self::new(secret);
@@ -142,7 +210,7 @@ impl AuthConfig {
             }
         }
 
-        config
+        Ok(config)
     }
 
     pub fn with_issuer(mut self, issuer: impl Into<String>) -> Self {
@@ -203,13 +271,6 @@ impl RequestId {
             .and_then(|value| Uuid::parse_str(value).ok())
             .map(RequestId)
     }
-}
-
-#[derive(Debug, Clone)]
-pub struct RequiredAccess {
-    pub min_tier: SensitivityTier,
-    pub access_level: AccessLevel,
-    pub allowed_roles: Option<Vec<Role>>,
 }
 
 #[derive(Debug, Clone)]
@@ -275,6 +336,7 @@ pub enum AuthError {
     Unauthorized { detail: String },
     Forbidden { detail: String },
     Invalid { detail: String },
+    Misconfigured { detail: String },
 }
 
 impl AuthError {
@@ -292,6 +354,12 @@ impl AuthError {
 
     pub fn invalid(detail: impl Into<String>) -> Self {
         Self::Invalid {
+            detail: detail.into(),
+        }
+    }
+
+    pub fn misconfigured(detail: impl Into<String>) -> Self {
+        Self::Misconfigured {
             detail: detail.into(),
         }
     }
@@ -316,11 +384,36 @@ impl AuthError {
                 "https://errors.lifeready.local/request/invalid",
                 Some(detail),
             ),
+            AuthError::Misconfigured { detail } => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Service misconfigured",
+                "https://errors.lifeready.local/config/misconfigured",
+                Some(detail),
+            ),
         };
 
         problem_response(status, r#type, title, detail, request_id.map(|id| id.0))
     }
 }
+
+impl IntoResponse for AuthError {
+    fn into_response(self) -> Response {
+        self.into_response(None)
+    }
+}
+
+impl std::fmt::Display for AuthError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AuthError::Unauthorized { detail } => write!(f, "unauthorized: {detail}"),
+            AuthError::Forbidden { detail } => write!(f, "forbidden: {detail}"),
+            AuthError::Invalid { detail } => write!(f, "invalid: {detail}"),
+            AuthError::Misconfigured { detail } => write!(f, "misconfigured: {detail}"),
+        }
+    }
+}
+
+impl std::error::Error for AuthError {}
 
 #[derive(Debug, Serialize)]
 struct ProblemDetails {
@@ -359,54 +452,12 @@ fn problem_response(
     response
 }
 
-fn tier_rank(tier: SensitivityTier) -> u8 {
-    match tier {
-        SensitivityTier::Green => 0,
-        SensitivityTier::Amber => 1,
-        SensitivityTier::Red => 2,
-    }
-}
-
-fn access_rank(level: AccessLevel) -> u8 {
-    match level {
-        AccessLevel::ReadOnlyPacks => 0,
-        AccessLevel::ReadOnlyAll => 1,
-        AccessLevel::LimitedWrite => 2,
-    }
-}
-
 fn access_level_scope(level: AccessLevel) -> &'static str {
     match level {
         AccessLevel::ReadOnlyPacks => "read:packs",
         AccessLevel::ReadOnlyAll => "read:all",
         AccessLevel::LimitedWrite => "write:limited",
     }
-}
-
-pub fn authorize(claims: &Claims, required: &RequiredAccess) -> Result<(), AuthError> {
-    if let Some(roles) = &required.allowed_roles {
-        if !roles.contains(&claims.role) {
-            return Err(AuthError::forbidden("role not permitted"));
-        }
-    }
-
-    let required_tier_rank = tier_rank(required.min_tier);
-    let max_tier_rank = claims
-        .tiers
-        .iter()
-        .map(|tier| tier_rank(*tier))
-        .max()
-        .unwrap_or(0);
-
-    if max_tier_rank < required_tier_rank {
-        return Err(AuthError::forbidden("insufficient tier access"));
-    }
-
-    if access_rank(claims.access_level) < access_rank(required.access_level) {
-        return Err(AuthError::forbidden("insufficient access level"));
-    }
-
-    Ok(())
 }
 
 #[derive(Clone)]
@@ -615,43 +666,30 @@ pub fn ok_response<T: Serialize>(payload: T) -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
 
-    #[test]
-    fn authorize_rejects_missing_tier() {
-        let claims = Claims::new(
-            "user",
-            Role::Principal,
-            vec![SensitivityTier::Green],
-            AccessLevel::LimitedWrite,
-            None,
-            60,
-        );
-        let required = RequiredAccess {
-            min_tier: SensitivityTier::Amber,
-            access_level: AccessLevel::ReadOnlyAll,
-            allowed_roles: None,
-        };
-        let result = authorize(&claims, &required);
-        assert!(result.is_err());
-    }
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
-    #[test]
-    fn authorize_accepts_higher_access() {
-        let claims = Claims::new(
-            "user",
-            Role::Principal,
-            vec![SensitivityTier::Red],
-            AccessLevel::LimitedWrite,
-            None,
-            60,
-        );
-        let required = RequiredAccess {
-            min_tier: SensitivityTier::Amber,
-            access_level: AccessLevel::ReadOnlyAll,
-            allowed_roles: Some(vec![Role::Principal, Role::Proxy]),
-        };
-        let result = authorize(&claims, &required);
-        assert!(result.is_ok());
+    fn with_env<F: FnOnce()>(vars: &[(&str, Option<&str>)], f: F) {
+        let _guard = ENV_LOCK.lock().expect("env lock");
+        let mut saved: Vec<(&str, Option<String>)> = Vec::with_capacity(vars.len());
+
+        for (key, value) in vars {
+            saved.push((*key, std::env::var(*key).ok()));
+            match value {
+                Some(value) => unsafe { std::env::set_var(*key, value) },
+                None => unsafe { std::env::remove_var(*key) },
+            }
+        }
+
+        f();
+
+        for (key, value) in saved {
+            match value {
+                Some(value) => unsafe { std::env::set_var(key, value) },
+                None => unsafe { std::env::remove_var(key) },
+            }
+        }
     }
 
     #[test]
@@ -692,5 +730,74 @@ mod tests {
             AuthError::Unauthorized { .. } => {}
             other => panic!("unexpected error: {other:?}"),
         }
+    }
+
+    #[test]
+    fn from_env_checked_production_rejects_missing_secret() {
+        with_env(
+            &[("LIFEREADY_ENV", Some("production")), ("JWT_SECRET", None)],
+            || {
+                let err = AuthConfig::from_env_checked().expect_err("should fail");
+                match err {
+                    AuthError::Misconfigured { .. } => {}
+                    other => panic!("unexpected error: {other:?}"),
+                }
+            },
+        );
+    }
+
+    #[test]
+    fn from_env_checked_production_rejects_dev_fallback_secret() {
+        with_env(
+            &[
+                ("LIFEREADY_ENV", Some("production")),
+                ("JWT_SECRET", Some(DEV_FALLBACK_SECRET)),
+            ],
+            || {
+                let err = AuthConfig::from_env_checked().expect_err("should fail");
+                match err {
+                    AuthError::Misconfigured { .. } => {}
+                    other => panic!("unexpected error: {other:?}"),
+                }
+            },
+        );
+    }
+
+    #[test]
+    fn from_env_checked_production_rejects_short_secret() {
+        with_env(
+            &[
+                ("LIFEREADY_ENV", Some("production")),
+                ("JWT_SECRET", Some("short")),
+            ],
+            || {
+                let err = AuthConfig::from_env_checked().expect_err("should fail");
+                match err {
+                    AuthError::Misconfigured { .. } => {}
+                    other => panic!("unexpected error: {other:?}"),
+                }
+            },
+        );
+    }
+
+    #[test]
+    fn from_env_checked_dev_allows_missing_secret_with_fallback() {
+        with_env(
+            &[("LIFEREADY_ENV", Some("dev")), ("JWT_SECRET", None)],
+            || {
+                let config = AuthConfig::from_env_checked().expect("dev should allow fallback");
+                let claims = Claims::new(
+                    "user",
+                    Role::Principal,
+                    vec![SensitivityTier::Green],
+                    AccessLevel::ReadOnlyAll,
+                    None,
+                    60,
+                );
+                let token = config.issue_token(&claims).expect("token");
+                let decoded = config.decode_token(&token).expect("decoded");
+                assert_eq!(decoded.sub, "user");
+            },
+        );
     }
 }

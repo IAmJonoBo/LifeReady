@@ -63,7 +63,10 @@ pub fn app() -> Router {
         pool: pool_from_env(),
         export_dir: export_dir_from_env(),
     };
-    let auth_config = Arc::new(AuthConfig::from_env());
+    let auth_config = Arc::new(
+        AuthConfig::from_env_checked()
+            .expect("AuthConfig misconfigured (check LIFEREADY_ENV and JWT_SECRET)"),
+    );
     Router::new()
         .route("/healthz", get(healthz))
         .route("/v1/audit/events", post(append_audit_event))

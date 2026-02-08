@@ -7,3 +7,4 @@ edition.workspace = true
 axum.workspace = true
 lifeready-auth.workspace = true
 chrono.workspace = true
+uuid.workspace = true

@@ -35,7 +35,10 @@ pub fn router() -> Router {
         export_dir: export_dir_from_env(),
         storage_dir: storage_dir_from_env(),
     };
-    let auth_config = Arc::new(AuthConfig::from_env());
+    let auth_config = Arc::new(
+        AuthConfig::from_env_checked()
+            .expect("AuthConfig misconfigured (check LIFEREADY_ENV and JWT_SECRET)"),
+    );
 
     Router::new()
         .route("/healthz", get(healthz))

@@ -7,8 +7,8 @@ use axum::{
 use chrono::{Duration as ChronoDuration, Utc};
 use lifeready_audit::{AuditEvent, InMemoryAuditSink};
 use lifeready_auth::{
-    invalid_request, request_id_middleware, AuthConfig, AuthLayer, Claims, RequestContext,
-    RequestId, Role, SensitivityTier,
+    invalid_request, request_id_middleware, AccessLevel, AuthConfig, AuthLayer, Claims,
+    RequestContext, RequestId, Role, SensitivityTier,
 };
 use lifeready_policy::{require_role, require_scope, require_tier, TierRequirement};
 use serde::{Deserialize, Serialize};
@@ -24,7 +24,10 @@ struct AppState {
 }
 
 pub fn router() -> Router {
-    let auth = Arc::new(AuthConfig::from_env());
+    let auth = Arc::new(
+        AuthConfig::from_env_checked()
+            .expect("AuthConfig misconfigured (check LIFEREADY_ENV and JWT_SECRET)"),
+    );
     let state = AppState {
         audit: InMemoryAuditSink::default(),
         auth: auth.clone(),

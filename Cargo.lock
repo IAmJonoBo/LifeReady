@@ -999,9 +999,9 @@ dependencies = [
 
 [[package]]
 name = "jsonwebtoken"
-version = "9.3.1"
+version = "9.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5a87cc7a48537badeae96744432de36f4be2b4a34a05a5ef32e9dd8a1c169dde"
+checksum = "a25bf8b9f77768d99f0e5e1dcd6cfc40a8ee91c8f5e7e1a00c18f69df9fe1c9a"
 dependencies = [
  "base64",
  "js-sys",
@@ -1085,6 +1085,7 @@ dependencies = [
  "axum",
  "chrono",
  "lifeready-auth",
+ "uuid",
 ]
 
 [[package]]

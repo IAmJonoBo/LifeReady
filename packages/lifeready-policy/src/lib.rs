@@ -167,6 +167,43 @@ mod tests {
     }
 
     #[test]
+    fn rbac_tier_allowlist_matrix() {
+        let cases = vec![
+            (
+                vec![SensitivityTier::Green],
+                vec![SensitivityTier::Green],
+                true,
+            ),
+            (
+                vec![SensitivityTier::Amber],
+                vec![SensitivityTier::Green, SensitivityTier::Amber],
+                true,
+            ),
+            (
+                vec![SensitivityTier::Red],
+                vec![SensitivityTier::Green, SensitivityTier::Amber],
+                false,
+            ),
+            (
+                vec![SensitivityTier::Green, SensitivityTier::Amber],
+                vec![SensitivityTier::Red],
+                false,
+            ),
+            (
+                vec![SensitivityTier::Green, SensitivityTier::Red],
+                vec![SensitivityTier::Red],
+                true,
+            ),
+        ];
+
+        for (tiers, allowlist, ok) in cases {
+            let ctx = ctx(vec![Role::Principal], tiers, vec!["read:all"]);
+            let result = require_tier(&ctx, TierRequirement::Allowlist(allowlist));
+            assert_eq!(result.is_ok(), ok);
+        }
+    }
+
+    #[test]
     fn rbac_scope_matrix() {
         let cases = vec![
             (vec!["read:all"], "read:all", true),

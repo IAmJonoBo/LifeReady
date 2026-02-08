@@ -136,7 +136,17 @@ Validation uses `openapi-generator-cli validate --recommend`.
    cp .env.example .env
    ```
 
-5. Run migrations (sqlx-cli)
+Required variables:
+
+- `LIFEREADY_ENV`: `dev` | `test` | `production` (default: `dev`)
+- `JWT_SECRET`: required in production; must not be the dev fallback and should be at least 32 chars
+
+### Production configuration
+
+- Set `LIFEREADY_ENV=production` and provide a strong `JWT_SECRET` (32+ chars) that is not the dev fallback.
+- HS256 security depends entirely on the signing key strength; weak or default secrets are unsafe.
+
+1. Run migrations (sqlx-cli)
 
    Install once:
 
@@ -150,7 +160,7 @@ Validation uses `openapi-generator-cli validate --recommend`.
    make db-migrate
    ```
 
-6. Run services (separate terminals)
+2. Run services (separate terminals)
 
    ```bash
    cargo run -p identity_service
