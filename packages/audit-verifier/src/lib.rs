@@ -1,11 +1,11 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct AuditAppend {
     pub actor_principal_id: String,
     pub action: String,
@@ -14,7 +14,7 @@ pub struct AuditAppend {
     pub payload: Value,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct AuditEvent {
     pub event_id: String,
     pub created_at: String,
@@ -23,7 +23,7 @@ pub struct AuditEvent {
     pub event: AuditAppend,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct ExportManifest {
     pub case_id: String,
     pub case_type: String,
@@ -33,7 +33,7 @@ pub struct ExportManifest {
     pub documents: Vec<ManifestDocument>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct ManifestDocument {
     pub slot_name: String,
     pub document_id: String,
@@ -199,4 +199,128 @@ fn sha256_file(path: &Path) -> Result<String, String> {
     let mut hasher = Sha256::new();
     hasher.update(bytes);
     Ok(hex::encode(hasher.finalize()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn unique_dir(name: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("{name}-{}-{}", std::process::id(), nanos))
+    }
+
+    fn write_audit_line(path: &Path, event: &AuditEvent) {
+        let line = serde_json::to_string(event).unwrap();
+        fs::write(path, format!("{line}\n")).unwrap();
+    }
+
+    #[test]
+    fn verify_audit_chain_accepts_valid_chain() {
+        let dir = unique_dir("audit-chain");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("audit.jsonl");
+
+        let mut event = AuditEvent {
+            event_id: "event-1".into(),
+            created_at: "2025-01-01T00:00:00Z".into(),
+            prev_hash: "0".repeat(64),
+            event_hash: "".into(),
+            event: AuditAppend {
+                actor_principal_id: "actor".into(),
+                action: "case.export".into(),
+                tier: "green".into(),
+                case_id: None,
+                payload: serde_json::json!({"ok": true}),
+            },
+        };
+        event.event_hash = compute_event_hash(&event.prev_hash, &event);
+        write_audit_line(&path, &event);
+
+        let head = verify_audit_chain(&path, None).expect("head");
+        assert_eq!(head, event.event_hash);
+    }
+
+    #[test]
+    fn verify_audit_chain_rejects_bad_head() {
+        let dir = unique_dir("audit-chain");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("audit.jsonl");
+
+        let mut event = AuditEvent {
+            event_id: "event-1".into(),
+            created_at: "2025-01-01T00:00:00Z".into(),
+            prev_hash: "0".repeat(64),
+            event_hash: "".into(),
+            event: AuditAppend {
+                actor_principal_id: "actor".into(),
+                action: "case.export".into(),
+                tier: "green".into(),
+                case_id: None,
+                payload: serde_json::json!({"ok": true}),
+            },
+        };
+        event.event_hash = compute_event_hash(&event.prev_hash, &event);
+        write_audit_line(&path, &event);
+
+        let err = verify_audit_chain(&path, Some("bad")).expect_err("should fail");
+        assert!(err.contains("Head hash mismatch"));
+    }
+
+    #[test]
+    fn verify_manifest_and_bundle_succeeds() {
+        let dir = unique_dir("bundle");
+        fs::create_dir_all(&dir).unwrap();
+
+        let doc_path = dir.join("documents");
+        fs::create_dir_all(&doc_path).unwrap();
+        let doc = doc_path.join("doc-1");
+        fs::write(&doc, b"doc").unwrap();
+        let doc_sha = sha256_file(&doc).unwrap();
+
+        let audit_path = dir.join("audit.jsonl");
+        let mut event = AuditEvent {
+            event_id: "event-1".into(),
+            created_at: "2025-01-01T00:00:00Z".into(),
+            prev_hash: "0".repeat(64),
+            event_hash: "".into(),
+            event: AuditAppend {
+                actor_principal_id: "actor".into(),
+                action: "case.export".into(),
+                tier: "green".into(),
+                case_id: None,
+                payload: serde_json::json!({"ok": true}),
+            },
+        };
+        event.event_hash = compute_event_hash(&event.prev_hash, &event);
+        write_audit_line(&audit_path, &event);
+        let audit_sha = sha256_file(&audit_path).unwrap();
+
+        let manifest = ExportManifest {
+            case_id: "case-1".into(),
+            case_type: "mhca39".into(),
+            exported_at: "2025-01-01T00:00:00Z".into(),
+            audit_head_hash: event.event_hash.clone(),
+            audit_events_sha256: audit_sha,
+            documents: vec![ManifestDocument {
+                slot_name: "slot".into(),
+                document_id: "doc-1".into(),
+                document_type: "id".into(),
+                title: "Doc".into(),
+                sha256: doc_sha,
+                bundle_path: "documents/doc-1".into(),
+            }],
+        };
+        let manifest_path = dir.join("manifest.json");
+        fs::write(&manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+
+        verify_manifest(&manifest_path, Some(&dir)).expect("manifest");
+        verify_bundle(&dir).expect("bundle");
+    }
 }

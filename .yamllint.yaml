@@ -1,0 +1,21 @@
+---
+# yamllint configuration for LifeReady
+# https://yamllint.readthedocs.io/en/stable/configuration.html
+
+extends: default
+
+rules:
+  # Disable quoted-strings rule to allow flexible quoting
+  quoted-strings:
+    quote-type: any
+    required: false
+
+  # Allow longer lines for URLs and complex values
+  line-length:
+    max: 120
+    level: warning
+
+  # Allow empty values (useful for nulls and placeholders)
+  empty-values:
+    forbid-in-block-mappings: false
+    forbid-in-flow-mappings: false

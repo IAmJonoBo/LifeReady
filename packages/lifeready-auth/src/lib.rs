@@ -666,12 +666,19 @@ pub fn ok_response<T: Serialize>(payload: T) -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::{
+        body::Body,
+        http::{header, Request, StatusCode},
+        routing::get,
+        Router,
+    };
     use std::sync::Mutex;
+    use tower::ServiceExt;
 
     static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     fn with_env<F: FnOnce()>(vars: &[(&str, Option<&str>)], f: F) {
-        let _guard = ENV_LOCK.lock().expect("env lock");
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|error| error.into_inner());
         let mut saved: Vec<(&str, Option<String>)> = Vec::with_capacity(vars.len());
 
         for (key, value) in vars {
@@ -730,6 +737,201 @@ mod tests {
             AuthError::Unauthorized { .. } => {}
             other => panic!("unexpected error: {other:?}"),
         }
+    }
+
+    #[test]
+    fn request_id_from_headers_parses_uuid() {
+        let request_id = Uuid::new_v4();
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            REQUEST_ID_HEADER,
+            HeaderValue::from_str(&request_id.to_string()).unwrap(),
+        );
+
+        let parsed = RequestId::from_headers(&headers).expect("request id");
+        assert_eq!(parsed.0, request_id);
+
+        headers.insert(REQUEST_ID_HEADER, HeaderValue::from_static("not-a-uuid"));
+        assert!(RequestId::from_headers(&headers).is_none());
+    }
+
+    #[test]
+    fn request_context_from_claims_derives_scopes() {
+        let mut claims = Claims::new(
+            "principal",
+            Role::Principal,
+            vec![SensitivityTier::Amber],
+            AccessLevel::ReadOnlyAll,
+            Some("owner@example.com".into()),
+            60,
+        );
+        claims.scopes.clear();
+        let request_id = RequestId(Uuid::new_v4());
+
+        let ctx = RequestContext::from_claims(request_id, &claims);
+        assert_eq!(ctx.request_id.0, request_id.0);
+        assert_eq!(ctx.principal_id, "principal");
+        assert_eq!(ctx.roles, vec![Role::Principal]);
+        assert_eq!(ctx.allowed_tiers, vec![SensitivityTier::Amber]);
+        assert_eq!(ctx.scopes, vec!["read:all".to_string()]);
+        assert_eq!(ctx.email.as_deref(), Some("owner@example.com"));
+    }
+
+    #[test]
+    fn ctx_reads_request_context_extension() {
+        let request_id = RequestId(Uuid::new_v4());
+        let claims = Claims::new(
+            "principal",
+            Role::Principal,
+            vec![SensitivityTier::Green],
+            AccessLevel::ReadOnlyPacks,
+            None,
+            60,
+        );
+        let ctx = RequestContext::from_claims(request_id, &claims);
+        let mut req = Request::builder().uri("/").body(Body::empty()).unwrap();
+        req.extensions_mut().insert(ctx.clone());
+
+        let stored = super::ctx(&req).expect("context");
+        assert_eq!(stored.principal_id, ctx.principal_id);
+    }
+
+    #[test]
+    fn bearer_token_errors_on_missing_or_invalid() {
+        let headers = HeaderMap::new();
+        assert!(matches!(
+            bearer_token(&headers),
+            Err(AuthError::Unauthorized { .. })
+        ));
+
+        let mut headers = HeaderMap::new();
+        headers.insert(header::AUTHORIZATION, HeaderValue::from_static("Basic abc"));
+        assert!(matches!(
+            bearer_token(&headers),
+            Err(AuthError::Unauthorized { .. })
+        ));
+
+        let mut headers = HeaderMap::new();
+        headers.insert(header::AUTHORIZATION, HeaderValue::from_static("Bearer "));
+        assert!(matches!(
+            bearer_token(&headers),
+            Err(AuthError::Unauthorized { .. })
+        ));
+
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::AUTHORIZATION,
+            HeaderValue::from_static("Bearer token"),
+        );
+        assert_eq!(bearer_token(&headers).ok(), Some("token"));
+    }
+
+    #[test]
+    fn auth_error_into_response_sets_problem_content_type() {
+        let response = AuthError::forbidden("nope").into_response(None);
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        assert_eq!(
+            response
+                .headers()
+                .get(header::CONTENT_TYPE)
+                .and_then(|value| value.to_str().ok()),
+            Some("application/problem+json")
+        );
+    }
+
+    #[tokio::test]
+    async fn request_id_middleware_sets_header() {
+        let app = Router::new()
+            .route("/check", get(|| async { StatusCode::OK }))
+            .layer(axum::middleware::from_fn(request_id_middleware));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/check")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .expect("response");
+
+        let request_id = response
+            .headers()
+            .get(REQUEST_ID_HEADER)
+            .and_then(|value| value.to_str().ok())
+            .expect("request id");
+        assert!(Uuid::parse_str(request_id).is_ok());
+    }
+
+    #[tokio::test]
+    async fn auth_middleware_rejects_missing_token() {
+        let config = AuthConfig::new("test-secret");
+        let state = AuthLayerState::new(config, Vec::<String>::new());
+
+        let app = Router::new()
+            .route(
+                "/protected",
+                get(|_ctx: RequestContext| async { StatusCode::OK }),
+            )
+            .with_state(state.clone())
+            .layer(axum::middleware::from_fn_with_state(state, auth_middleware))
+            .layer(axum::middleware::from_fn(request_id_middleware));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/protected")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            response
+                .headers()
+                .get(header::CONTENT_TYPE)
+                .and_then(|value| value.to_str().ok()),
+            Some("application/problem+json")
+        );
+        assert!(response.headers().get(REQUEST_ID_HEADER).is_some());
+    }
+
+    #[tokio::test]
+    async fn auth_middleware_allows_valid_token() {
+        let config = AuthConfig::new("test-secret");
+        let state = AuthLayerState::new(config.clone(), Vec::<String>::new());
+        let claims = Claims::new(
+            "principal",
+            Role::Principal,
+            vec![SensitivityTier::Green],
+            AccessLevel::ReadOnlyAll,
+            None,
+            60,
+        );
+        let token = config.issue_token(&claims).expect("token");
+
+        let app = Router::new()
+            .route(
+                "/protected",
+                get(|_ctx: RequestContext| async { StatusCode::OK }),
+            )
+            .with_state(state.clone())
+            .layer(axum::middleware::from_fn_with_state(state, auth_middleware));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/protected")
+                    .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(response.status(), StatusCode::OK);
     }
 
     #[test]

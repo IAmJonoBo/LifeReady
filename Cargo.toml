@@ -29,7 +29,9 @@ uuid = { version = "1.20.0", features = ["v4", "serde"] }
 thiserror = "2.0.18"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
-jsonwebtoken = "9.3.1"
+jsonwebtoken = { version = "10.3.0", default-features = false, features = [
+  "rust_crypto",
+] }
 
 lifeready-auth = { path = "packages/lifeready-auth" }
 lifeready-policy = { path = "packages/lifeready-policy" }

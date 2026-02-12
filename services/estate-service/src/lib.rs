@@ -316,3 +316,99 @@ pub async fn check_db() -> Option<sqlx::PgPool> {
     tracing::info!("database connected");
     Some(pool)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::future::Future;
+    use std::sync::Mutex;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    fn with_env(vars: &[(&str, Option<&str>)], f: impl FnOnce()) {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let mut saved = Vec::with_capacity(vars.len());
+
+        for (key, value) in vars {
+            saved.push((*key, std::env::var(*key).ok()));
+            match value {
+                Some(value) => unsafe { std::env::set_var(*key, value) },
+                None => unsafe { std::env::remove_var(*key) },
+            }
+        }
+
+        f();
+
+        for (key, value) in saved {
+            match value {
+                Some(value) => unsafe { std::env::set_var(key, value) },
+                None => unsafe { std::env::remove_var(key) },
+            }
+        }
+    }
+
+    async fn with_env_async<F, Fut>(vars: &[(&str, Option<&str>)], f: F)
+    where
+        F: FnOnce() -> Fut,
+        Fut: Future<Output = ()>,
+    {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let mut saved = Vec::with_capacity(vars.len());
+
+        for (key, value) in vars {
+            saved.push((*key, std::env::var(*key).ok()));
+            match value {
+                Some(value) => unsafe { std::env::set_var(*key, value) },
+                None => unsafe { std::env::remove_var(*key) },
+            }
+        }
+
+        f().await;
+
+        for (key, value) in saved {
+            match value {
+                Some(value) => unsafe { std::env::set_var(key, value) },
+                None => unsafe { std::env::remove_var(key) },
+            }
+        }
+    }
+
+    #[test]
+    fn addr_from_env_prefers_estate_port() {
+        with_env(
+            &[
+                ("HOST", Some("127.0.0.1")),
+                ("ESTATE_PORT", Some("5556")),
+                ("PORT", Some("9000")),
+            ],
+            || {
+                let addr = addr_from_env(8082);
+                assert_eq!(addr, "127.0.0.1:5556".parse::<SocketAddr>().unwrap());
+            },
+        );
+    }
+
+    #[test]
+    fn addr_from_env_falls_back_to_port() {
+        with_env(
+            &[
+                ("HOST", Some("0.0.0.0")),
+                ("ESTATE_PORT", None),
+                ("PORT", Some("7002")),
+            ],
+            || {
+                let addr = addr_from_env(8082);
+                assert_eq!(addr, "0.0.0.0:7002".parse::<SocketAddr>().unwrap());
+            },
+        );
+    }
+
+    #[tokio::test]
+    async fn check_db_returns_none_without_database_url() {
+        with_env_async(&[("DATABASE_URL", None)], || async {
+            let result = check_db().await;
+            assert!(result.is_none());
+        })
+        .await;
+    }
+}

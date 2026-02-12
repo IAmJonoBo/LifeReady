@@ -1,22 +1,60 @@
+use axum::Router;
+use std::future::{pending, Future};
+use tokio::net::TcpListener;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::registry()
-        .with(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "case_service=info,tower_http=info".into()),
-        )
-        .with(tracing_subscriber::fmt::layer())
-        .init();
+    init_tracing("case_service=info,tower_http=info");
 
     let _db = case_service::check_db().await;
-
-    let app = case_service::router().layer(TraceLayer::new_for_http());
     let addr = case_service::addr_from_env(8084);
 
     tracing::info!(%addr, "case-service listening");
-    let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
-    axum::serve(listener, app).await.unwrap();
+    let listener = TcpListener::bind(addr).await.unwrap();
+    run_with_listener(listener, pending()).await.unwrap();
+}
+
+fn init_tracing(default_filter: &str) {
+    tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| default_filter.into()),
+        )
+        .with(tracing_subscriber::fmt::layer())
+        .init();
+}
+
+fn build_app() -> Router {
+    case_service::router().layer(TraceLayer::new_for_http())
+}
+
+async fn run_with_listener<F>(listener: TcpListener, shutdown: F) -> std::io::Result<()>
+where
+    F: Future<Output = ()> + Send + 'static,
+{
+    axum::serve(listener, build_app())
+        .with_graceful_shutdown(shutdown)
+        .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::sync::oneshot;
+
+    #[tokio::test]
+    async fn run_with_listener_stops_on_shutdown() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let (tx, rx) = oneshot::channel::<()>();
+        let handle = tokio::spawn(async move {
+            run_with_listener(listener, async move {
+                let _ = rx.await;
+            })
+            .await
+        });
+        let _ = tx.send(());
+        handle.await.unwrap().unwrap();
+    }
 }

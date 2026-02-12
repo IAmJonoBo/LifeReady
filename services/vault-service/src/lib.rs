@@ -484,3 +484,69 @@ fn normalize_blob_ref(
 
     Ok(candidate)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::http::StatusCode;
+    use uuid::Uuid;
+
+    #[test]
+    fn tier_string_roundtrip() {
+        assert_eq!(tier_to_str(SensitivityTier::Green), "green");
+        assert_eq!(tier_to_str(SensitivityTier::Amber), "amber");
+        assert_eq!(tier_to_str(SensitivityTier::Red), "red");
+
+        assert_eq!(
+            tier_from_db("green".to_string()),
+            Some(SensitivityTier::Green)
+        );
+        assert_eq!(
+            tier_from_db("amber".to_string()),
+            Some(SensitivityTier::Amber)
+        );
+        assert_eq!(tier_from_db("red".to_string()), Some(SensitivityTier::Red));
+        assert_eq!(tier_from_db("unknown".to_string()), None);
+    }
+
+    #[test]
+    fn sha256_validation() {
+        let valid = "a".repeat(64);
+        let invalid = "g".repeat(64);
+        assert!(is_sha256(&valid));
+        assert!(!is_sha256(&invalid));
+        assert!(!is_sha256("short"));
+    }
+
+    #[test]
+    fn parse_uuid_accepts_valid() {
+        let value = uuid::Uuid::new_v4().to_string();
+        assert!(parse_uuid(&value).is_some());
+        assert!(parse_uuid("not-a-uuid").is_none());
+    }
+
+    #[test]
+    fn normalize_blob_ref_resolves_paths() {
+        let base = std::env::temp_dir().join(format!("vault-test-{}", Uuid::new_v4()));
+        let document_id = Uuid::new_v4();
+        let path = base.join(document_id.to_string());
+        std::fs::create_dir_all(&base).unwrap();
+        std::fs::write(&path, "").unwrap();
+
+        let request_id = RequestId(Uuid::new_v4());
+        let auto = normalize_blob_ref("", &base, document_id, request_id).unwrap();
+        assert!(auto.starts_with("file://"));
+
+        let custom = normalize_blob_ref("file:///tmp", &base, document_id, request_id).unwrap();
+        assert_eq!(custom, "file:///tmp");
+
+        let missing = normalize_blob_ref("missing", &base, document_id, request_id);
+        assert_eq!(missing.unwrap_err().status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn db_error_to_response_returns_bad_request() {
+        let response = db_error_to_response(sqlx::Error::RowNotFound, RequestId(Uuid::new_v4()));
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+}

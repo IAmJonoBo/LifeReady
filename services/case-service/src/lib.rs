@@ -747,3 +747,96 @@ fn db_error_to_response(error: sqlx::Error, request_id: RequestId) -> axum::resp
     }
     invalid_request(Some(request_id), error.to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+    use uuid::Uuid;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    fn with_env(vars: &[(&str, Option<&str>)], f: impl FnOnce()) {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let mut saved = Vec::with_capacity(vars.len());
+
+        for (key, value) in vars {
+            saved.push((*key, std::env::var(*key).ok()));
+            match value {
+                Some(value) => unsafe { std::env::set_var(*key, value) },
+                None => unsafe { std::env::remove_var(*key) },
+            }
+        }
+
+        f();
+
+        for (key, value) in saved {
+            match value {
+                Some(value) => unsafe { std::env::set_var(key, value) },
+                None => unsafe { std::env::remove_var(key) },
+            }
+        }
+    }
+
+    #[test]
+    fn parse_uuid_accepts_valid() {
+        let value = uuid::Uuid::new_v4().to_string();
+        assert!(parse_uuid(&value).is_some());
+        assert!(parse_uuid("not-a-uuid").is_none());
+    }
+
+    #[test]
+    fn default_mhca39_slots_contains_expected_items() {
+        let slots = default_mhca39_slots();
+        assert!(slots.contains(&"id_subject".to_string()));
+        assert!(slots.contains(&"medical_evidence_1".to_string()));
+        assert!(slots.len() >= 6);
+    }
+
+    #[test]
+    fn resolve_blob_ref_handles_prefixes() {
+        let base = PathBuf::from("storage");
+        let absolute = resolve_blob_ref("/tmp/example", &base).unwrap();
+        assert_eq!(absolute, PathBuf::from("/tmp/example"));
+
+        let file = resolve_blob_ref("file:///tmp/blob", &base).unwrap();
+        assert_eq!(file, PathBuf::from("/tmp/blob"));
+
+        let relative = resolve_blob_ref("blob.bin", &base).unwrap();
+        assert_eq!(relative, base.join("blob.bin"));
+    }
+
+    #[test]
+    fn sha256_helpers_work() {
+        let digest = sha256_bytes(b"hello");
+        assert_eq!(digest.len(), 64);
+
+        let dir = std::env::temp_dir().join(format!("case-test-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("file.txt");
+        std::fs::write(&path, b"hello").unwrap();
+        let file_digest = sha256_file(&path).unwrap();
+        assert_eq!(file_digest, digest);
+    }
+
+    #[test]
+    fn zero_hash_is_64_chars() {
+        let value = zero_hash();
+        assert_eq!(value.len(), 64);
+        assert!(value.chars().all(|c| c == '0'));
+    }
+
+    #[test]
+    fn env_dirs_use_defaults_when_unset() {
+        with_env(
+            &[("LOCAL_EXPORT_DIR", None), ("LOCAL_STORAGE_DIR", None)],
+            || {
+                assert_eq!(
+                    export_dir_from_env(),
+                    PathBuf::from("exports").join("cases")
+                );
+                assert_eq!(storage_dir_from_env(), PathBuf::from("storage"));
+            },
+        );
+    }
+}

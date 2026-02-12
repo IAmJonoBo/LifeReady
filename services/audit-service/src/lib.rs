@@ -372,3 +372,126 @@ fn db_error_to_response(error: sqlx::Error, request_id: RequestId) -> axum::resp
     }
     invalid_request(Some(request_id), error.to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::http::StatusCode;
+    use std::sync::Mutex;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    fn with_env(vars: &[(&str, Option<&str>)], f: impl FnOnce()) {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let mut saved = Vec::with_capacity(vars.len());
+
+        for (key, value) in vars {
+            saved.push((*key, std::env::var(*key).ok()));
+            match value {
+                Some(value) => unsafe { std::env::set_var(*key, value) },
+                None => unsafe { std::env::remove_var(*key) },
+            }
+        }
+
+        f();
+
+        for (key, value) in saved {
+            match value {
+                Some(value) => unsafe { std::env::set_var(key, value) },
+                None => unsafe { std::env::remove_var(key) },
+            }
+        }
+    }
+
+    #[test]
+    fn export_dir_defaults_when_unset() {
+        with_env(&[("AUDIT_EXPORT_DIR", None)], || {
+            assert_eq!(
+                export_dir_from_env(),
+                PathBuf::from("exports").join("audit")
+            );
+        });
+    }
+
+    #[test]
+    fn write_audit_jsonl_writes_lines() {
+        let dir = std::env::temp_dir().join(format!("audit-test-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("audit.jsonl");
+
+        let event = AuditEvent {
+            event_id: Uuid::new_v4().to_string(),
+            created_at: Utc::now().to_rfc3339(),
+            prev_hash: zero_hash(),
+            event_hash: zero_hash(),
+            event: AuditAppend {
+                actor_principal_id: Uuid::new_v4().to_string(),
+                action: "case.export".into(),
+                tier: "green".into(),
+                case_id: None,
+                payload: serde_json::json!({"ok": true}),
+            },
+        };
+
+        write_audit_jsonl(&path, &[event.clone()]).unwrap();
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(content.contains(&event.event_id));
+    }
+
+    #[test]
+    fn sha256_file_returns_hash() {
+        let dir = std::env::temp_dir().join(format!("audit-hash-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("payload.txt");
+        std::fs::write(&path, b"hello").unwrap();
+        let hash = sha256_file(&path).unwrap();
+        assert_eq!(hash.len(), 64);
+    }
+
+    #[test]
+    fn canonical_event_json_is_stable() {
+        let event = AuditEvent {
+            event_id: Uuid::new_v4().to_string(),
+            created_at: Utc::now().to_rfc3339(),
+            prev_hash: zero_hash(),
+            event_hash: zero_hash(),
+            event: AuditAppend {
+                actor_principal_id: Uuid::new_v4().to_string(),
+                action: "audit.append".into(),
+                tier: "amber".into(),
+                case_id: None,
+                payload: serde_json::json!({"b": 1, "a": 2}),
+            },
+        };
+
+        let first = canonical_event_json(&event);
+        let second = canonical_event_json(&event);
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn compute_event_hash_returns_hex() {
+        let event = AuditEvent {
+            event_id: Uuid::new_v4().to_string(),
+            created_at: Utc::now().to_rfc3339(),
+            prev_hash: zero_hash(),
+            event_hash: zero_hash(),
+            event: AuditAppend {
+                actor_principal_id: Uuid::new_v4().to_string(),
+                action: "audit.append".into(),
+                tier: "green".into(),
+                case_id: None,
+                payload: serde_json::json!({"ok": true}),
+            },
+        };
+
+        let hash = compute_event_hash(&zero_hash(), &event);
+        assert_eq!(hash.len(), 64);
+    }
+
+    #[test]
+    fn db_error_to_response_returns_bad_request() {
+        let response = db_error_to_response(sqlx::Error::RowNotFound, RequestId(Uuid::new_v4()));
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+}
