@@ -20,9 +20,9 @@ runtimes:
 lint:
   enabled:
     - osv-scanner@2.2.4
-    - renovate@43.4.2
+    - renovate@43.8.5
     - actionlint@1.7.10
-    - checkov@3.2.500
+    - checkov@3.2.501
     - clippy@1.65.0
     - dart@3.9.2
     - git-diff-check
