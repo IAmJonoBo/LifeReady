@@ -197,7 +197,7 @@ async fn export_bundle_verifies_and_detects_tamper() {
 
 async fn reset_db(pool: &PgPool) {
     sqlx::query(
-        "TRUNCATE audit_events, document_versions, documents, mhca39_evidence, mhca39_cases, case_artifacts, cases RESTART IDENTITY",
+        "TRUNCATE audit_events, document_versions, documents, mhca39_evidence, mhca39_cases, case_evidence, will_prep_cases, deceased_estate_cases, case_artifacts, cases RESTART IDENTITY CASCADE",
     )
     .execute(pool)
     .await
