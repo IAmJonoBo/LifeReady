@@ -20,6 +20,8 @@ lifeready-policy.workspace = true
 lifeready-audit.workspace = true
 sha2 = "0.10"
 hex = "0.4"
+zip = { version = "7.4", default-features = false, features = ["deflate"] }
+walkdir = "2.5"
 
 [dev-dependencies]
 bytes = "1"

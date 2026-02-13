@@ -323,4 +323,235 @@ mod tests {
         verify_manifest(&manifest_path, Some(&dir)).expect("manifest");
         verify_bundle(&dir).expect("bundle");
     }
+
+    fn build_chain(count: usize) -> Vec<AuditEvent> {
+        let mut events = Vec::new();
+        let mut prev = "0".repeat(64);
+        for i in 0..count {
+            let mut event = AuditEvent {
+                event_id: format!("event-{i}"),
+                created_at: format!("2025-01-01T00:00:{:02}Z", i),
+                prev_hash: prev.clone(),
+                event_hash: "".into(),
+                event: AuditAppend {
+                    actor_principal_id: "actor".into(),
+                    action: format!("action.{i}"),
+                    tier: "green".into(),
+                    case_id: Some("case-1".into()),
+                    payload: serde_json::json!({"step": i}),
+                },
+            };
+            event.event_hash = compute_event_hash(&event.prev_hash, &event);
+            prev = event.event_hash.clone();
+            events.push(event);
+        }
+        events
+    }
+
+    fn write_chain(path: &Path, events: &[AuditEvent]) {
+        let lines: Vec<String> = events.iter().map(|e| serde_json::to_string(e).unwrap()).collect();
+        fs::write(path, lines.join("\n") + "\n").unwrap();
+    }
+
+    fn build_bundle(dir: &Path) -> (ExportManifest, String) {
+        fs::create_dir_all(dir.join("documents")).unwrap();
+        let doc = dir.join("documents/doc-1");
+        fs::write(&doc, b"document content").unwrap();
+        let doc_sha = sha256_file(&doc).unwrap();
+
+        let events = build_chain(3);
+        let audit_path = dir.join("audit.jsonl");
+        write_chain(&audit_path, &events);
+        let audit_sha = sha256_file(&audit_path).unwrap();
+        let head_hash = events.last().unwrap().event_hash.clone();
+
+        let manifest = ExportManifest {
+            case_id: "case-1".into(),
+            case_type: "mhca39".into(),
+            exported_at: "2025-01-01T00:00:00Z".into(),
+            audit_head_hash: head_hash.clone(),
+            audit_events_sha256: audit_sha,
+            documents: vec![ManifestDocument {
+                slot_name: "id_subject".into(),
+                document_id: "doc-1".into(),
+                document_type: "id".into(),
+                title: "Subject ID".into(),
+                sha256: doc_sha,
+                bundle_path: "documents/doc-1".into(),
+            }],
+        };
+
+        let manifest_path = dir.join("manifest.json");
+        fs::write(&manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+        (manifest, head_hash)
+    }
+
+    #[test]
+    fn multi_event_chain_verifies() {
+        let dir = unique_dir("multi-chain");
+        fs::create_dir_all(&dir).unwrap();
+        let events = build_chain(5);
+        let path = dir.join("audit.jsonl");
+        write_chain(&path, &events);
+
+        let head = verify_audit_chain(&path, None).expect("valid chain");
+        assert_eq!(head, events.last().unwrap().event_hash);
+    }
+
+    #[test]
+    fn multi_event_chain_rejects_expected_head_mismatch() {
+        let dir = unique_dir("multi-chain-head");
+        fs::create_dir_all(&dir).unwrap();
+        let events = build_chain(3);
+        let path = dir.join("audit.jsonl");
+        write_chain(&path, &events);
+
+        let err = verify_audit_chain(&path, Some(&"a".repeat(64))).expect_err("should fail");
+        assert!(err.contains("Head hash mismatch"));
+    }
+
+    #[test]
+    fn tampered_event_hash_detected() {
+        let dir = unique_dir("tamper-hash");
+        fs::create_dir_all(&dir).unwrap();
+        let mut events = build_chain(3);
+        events[1].event_hash = "f".repeat(64);
+        let path = dir.join("audit.jsonl");
+        write_chain(&path, &events);
+
+        let err = verify_audit_chain(&path, None).expect_err("should fail");
+        assert!(err.contains("Hash mismatch at line 2"));
+    }
+
+    #[test]
+    fn tampered_prev_hash_detected() {
+        let dir = unique_dir("tamper-prev");
+        fs::create_dir_all(&dir).unwrap();
+        let mut events = build_chain(3);
+        events[2].prev_hash = "a".repeat(64);
+        let path = dir.join("audit.jsonl");
+        write_chain(&path, &events);
+
+        let err = verify_audit_chain(&path, None).expect_err("should fail");
+        assert!(err.contains("Chain break at line 3"));
+    }
+
+    #[test]
+    fn tampered_event_payload_detected() {
+        let dir = unique_dir("tamper-payload");
+        fs::create_dir_all(&dir).unwrap();
+        let mut events = build_chain(2);
+        events[0].event.payload = serde_json::json!({"tampered": true});
+        let path = dir.join("audit.jsonl");
+        write_chain(&path, &events);
+
+        let err = verify_audit_chain(&path, None).expect_err("should fail");
+        assert!(err.contains("Hash mismatch at line 1"));
+    }
+
+    #[test]
+    fn tampered_document_detected_by_manifest() {
+        let dir = unique_dir("tamper-doc");
+        build_bundle(&dir);
+
+        fs::write(dir.join("documents/doc-1"), b"TAMPERED content").unwrap();
+
+        let err = verify_bundle(&dir).expect_err("should fail");
+        assert!(err.contains("Checksum mismatch"));
+    }
+
+    #[test]
+    fn tampered_manifest_document_sha256_detected() {
+        let dir = unique_dir("tamper-manifest");
+        build_bundle(&dir);
+
+        let manifest_path = dir.join("manifest.json");
+        let mut manifest: serde_json::Value =
+            serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
+        manifest["documents"][0]["sha256"] = serde_json::Value::String("d".repeat(64));
+        fs::write(&manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+
+        let err = verify_bundle(&dir).expect_err("should fail");
+        assert!(err.contains("Checksum mismatch"));
+    }
+
+    #[test]
+    fn tampered_audit_head_hash_in_manifest_detected() {
+        let dir = unique_dir("tamper-head");
+        build_bundle(&dir);
+
+        let manifest_path = dir.join("manifest.json");
+        let mut manifest: serde_json::Value =
+            serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
+        manifest["audit_head_hash"] = serde_json::Value::String("b".repeat(64));
+        fs::write(&manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+
+        let err = verify_bundle(&dir).expect_err("should fail");
+        assert!(err.contains("Head hash mismatch"));
+    }
+
+    #[test]
+    fn tampered_audit_events_sha256_in_manifest_detected() {
+        let dir = unique_dir("tamper-audit-sha");
+        build_bundle(&dir);
+
+        let manifest_path = dir.join("manifest.json");
+        let mut manifest: serde_json::Value =
+            serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
+        manifest["audit_events_sha256"] = serde_json::Value::String("c".repeat(64));
+        fs::write(&manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+
+        let err = verify_bundle(&dir).expect_err("should fail");
+        assert!(err.contains("audit.jsonl checksum mismatch"));
+    }
+
+    #[test]
+    fn bundle_with_multiple_documents_verifies() {
+        let dir = unique_dir("multi-doc");
+        fs::create_dir_all(dir.join("documents")).unwrap();
+
+        let doc1 = dir.join("documents/doc-1");
+        fs::write(&doc1, b"first document").unwrap();
+        let doc1_sha = sha256_file(&doc1).unwrap();
+
+        let doc2 = dir.join("documents/doc-2");
+        fs::write(&doc2, b"second document").unwrap();
+        let doc2_sha = sha256_file(&doc2).unwrap();
+
+        let events = build_chain(1);
+        let audit_path = dir.join("audit.jsonl");
+        write_chain(&audit_path, &events);
+        let audit_sha = sha256_file(&audit_path).unwrap();
+
+        let manifest = ExportManifest {
+            case_id: "case-2".into(),
+            case_type: "mhca39".into(),
+            exported_at: "2025-01-01T00:00:00Z".into(),
+            audit_head_hash: events[0].event_hash.clone(),
+            audit_events_sha256: audit_sha,
+            documents: vec![
+                ManifestDocument {
+                    slot_name: "id_subject".into(),
+                    document_id: "doc-1".into(),
+                    document_type: "id".into(),
+                    title: "Doc 1".into(),
+                    sha256: doc1_sha,
+                    bundle_path: "documents/doc-1".into(),
+                },
+                ManifestDocument {
+                    slot_name: "id_applicant".into(),
+                    document_id: "doc-2".into(),
+                    document_type: "id".into(),
+                    title: "Doc 2".into(),
+                    sha256: doc2_sha,
+                    bundle_path: "documents/doc-2".into(),
+                },
+            ],
+        };
+
+        let manifest_path = dir.join("manifest.json");
+        fs::write(&manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+
+        verify_bundle(&dir).expect("valid bundle");
+    }
 }
