@@ -1,6 +1,9 @@
+use async_trait::async_trait;
 use axum::{
+    body::Body,
     extract::{Extension, Path, Query, State},
-    http::StatusCode,
+    http::{header, StatusCode},
+    response::IntoResponse,
     routing::{get, post},
     Json, Router,
 };
@@ -13,21 +16,126 @@ use lifeready_policy::{
     require_role, require_scope, require_tier, Role, SensitivityTier, TierRequirement,
 };
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use sqlx::{PgPool, Row};
+use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::{path::PathBuf, str::FromStr};
 
+// --- Storage trait and implementations ---
+
+/// Storage adapter trait for document blob storage
+#[async_trait]
+pub trait Storage: Send + Sync {
+    /// Store bytes at the given key
+    async fn put(&self, key: &str, data: &[u8]) -> io::Result<()>;
+
+    /// Retrieve bytes for the given key
+    async fn get(&self, key: &str) -> io::Result<Vec<u8>>;
+
+    /// Check if the key exists
+    async fn exists(&self, key: &str) -> io::Result<bool>;
+}
+
+/// Local filesystem storage implementation for development
+pub struct LocalFsStorage {
+    base_dir: PathBuf,
+}
+
+impl LocalFsStorage {
+    pub fn new(base_dir: PathBuf) -> Self {
+        Self { base_dir }
+    }
+
+    fn key_to_path(&self, key: &str) -> PathBuf {
+        if let Some(path) = key.strip_prefix("file://") {
+            PathBuf::from(path)
+        } else if key.starts_with('/') {
+            PathBuf::from(key)
+        } else {
+            self.base_dir.join(key)
+        }
+    }
+}
+
+#[async_trait]
+impl Storage for LocalFsStorage {
+    async fn put(&self, key: &str, data: &[u8]) -> io::Result<()> {
+        let path = self.key_to_path(key);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(path, data)
+    }
+
+    async fn get(&self, key: &str) -> io::Result<Vec<u8>> {
+        let path = self.key_to_path(key);
+        std::fs::read(path)
+    }
+
+    async fn exists(&self, key: &str) -> io::Result<bool> {
+        let path = self.key_to_path(key);
+        Ok(path.exists())
+    }
+}
+
+/// Placeholder Azure Blob Storage implementation (feature-gated)
+#[cfg(feature = "azure")]
+pub struct AzureBlobStorage {
+    _container: String,
+}
+
+#[cfg(feature = "azure")]
+impl AzureBlobStorage {
+    pub fn new(container: String) -> Self {
+        Self {
+            _container: container,
+        }
+    }
+}
+
+#[cfg(feature = "azure")]
+#[async_trait]
+impl Storage for AzureBlobStorage {
+    async fn put(&self, _key: &str, _data: &[u8]) -> io::Result<()> {
+        // Placeholder: Azure integration to be implemented in Phase 4+
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "Azure Blob Storage not yet integrated",
+        ))
+    }
+
+    async fn get(&self, _key: &str) -> io::Result<Vec<u8>> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "Azure Blob Storage not yet integrated",
+        ))
+    }
+
+    async fn exists(&self, _key: &str) -> io::Result<bool> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "Azure Blob Storage not yet integrated",
+        ))
+    }
+}
+
+// --- App State ---
+
 #[derive(Clone)]
 struct AppState {
     pool: Option<PgPool>,
+    storage: Arc<dyn Storage>,
     storage_dir: PathBuf,
 }
 
 pub fn router() -> Router {
+    let storage_dir = storage_dir_from_env();
     let state = AppState {
         pool: pool_from_env(),
-        storage_dir: storage_dir_from_env(),
+        storage: Arc::new(LocalFsStorage::new(storage_dir.clone())),
+        storage_dir,
     };
     let auth_config = Arc::new(
         AuthConfig::from_env_checked()
@@ -44,6 +152,7 @@ pub fn router() -> Router {
             post(commit_document),
         )
         .route("/v1/documents/{document_id}", get(get_document))
+        .route("/v1/documents/{document_id}/download", get(download_document))
         .with_state(state)
         .layer(AuthLayer::new(auth_config))
         .layer(axum::middleware::from_fn(request_id_middleware))
@@ -316,6 +425,155 @@ async fn get_document(
             .map_err(|error| db_error_to_response(error.into(), request_id))?,
         created_at: created_at.to_rfc3339(),
     }))
+}
+
+#[derive(Debug, Deserialize)]
+struct DownloadQuery {
+    version_id: Option<String>,
+}
+
+async fn download_document(
+    State(state): State<AppState>,
+    ctx: RequestContext,
+    Extension(request_id): Extension<RequestId>,
+    Path(document_id): Path<String>,
+    Query(query): Query<DownloadQuery>,
+) -> Result<impl IntoResponse, axum::response::Response> {
+    let pool = match &state.pool {
+        Some(pool) => pool,
+        None => return Err(invalid_request(Some(request_id), "database unavailable")),
+    };
+    require_role(&ctx, &[Role::Principal, Role::Proxy, Role::ExecutorNominee])
+        .map_err(|error| error.into_response(Some(request_id)))?;
+    require_tier(&ctx, TierRequirement::Min(SensitivityTier::Amber))
+        .map_err(|error| error.into_response(Some(request_id)))?;
+    require_scope(&ctx, "read:all").map_err(|error| error.into_response(Some(request_id)))?;
+
+    let document_id = parse_uuid(&document_id)
+        .ok_or_else(|| invalid_request(Some(request_id), "invalid document_id"))?;
+    let principal_id = parse_uuid(&ctx.principal_id)
+        .ok_or_else(|| invalid_request(Some(request_id), "invalid principal_id"))?;
+
+    // Verify document ownership and get sensitivity tier
+    let doc_row = sqlx::query(
+        "SELECT sensitivity, title FROM documents WHERE document_id = $1 AND principal_id = $2",
+    )
+    .bind(document_id)
+    .bind(principal_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|error| db_error_to_response(error, request_id))?;
+
+    let doc_row = match doc_row {
+        Some(row) => row,
+        None => return Err(not_found(Some(request_id), "document not found")),
+    };
+
+    let sensitivity = tier_from_db(
+        doc_row
+            .try_get::<String, _>("sensitivity")
+            .map_err(|error| db_error_to_response(error.into(), request_id))?,
+    )
+    .ok_or_else(|| invalid_request(Some(request_id), "invalid sensitivity"))?;
+
+    ensure_document_access(&ctx, sensitivity, request_id)?;
+
+    let title: String = doc_row
+        .try_get("title")
+        .map_err(|error| db_error_to_response(error.into(), request_id))?;
+
+    // Get version - either specified or latest
+    let version_row = if let Some(version_id_str) = &query.version_id {
+        let version_id = parse_uuid(version_id_str)
+            .ok_or_else(|| invalid_request(Some(request_id), "invalid version_id"))?;
+        sqlx::query(
+            "SELECT blob_ref, sha256, mime_type FROM document_versions \
+             WHERE document_id = $1 AND version_id = $2",
+        )
+        .bind(document_id)
+        .bind(version_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|error| db_error_to_response(error, request_id))?
+    } else {
+        sqlx::query(
+            "SELECT blob_ref, sha256, mime_type FROM document_versions \
+             WHERE document_id = $1 ORDER BY created_at DESC LIMIT 1",
+        )
+        .bind(document_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|error| db_error_to_response(error, request_id))?
+    };
+
+    let version_row = match version_row {
+        Some(row) => row,
+        None => return Err(not_found(Some(request_id), "document version not found")),
+    };
+
+    let blob_ref: String = version_row
+        .try_get("blob_ref")
+        .map_err(|error| db_error_to_response(error.into(), request_id))?;
+    let expected_sha256: String = version_row
+        .try_get("sha256")
+        .map_err(|error| db_error_to_response(error.into(), request_id))?;
+    let mime_type: String = version_row
+        .try_get("mime_type")
+        .map_err(|error| db_error_to_response(error.into(), request_id))?;
+
+    // Read document content via storage adapter
+    let bytes = state
+        .storage
+        .get(&blob_ref)
+        .await
+        .map_err(|error| not_found(Some(request_id), format!("blob not found: {}", error)))?;
+
+    // Re-verify SHA256 on read
+    let actual_sha256 = compute_sha256(&bytes);
+    if actual_sha256 != expected_sha256 {
+        return Err(invalid_request(
+            Some(request_id),
+            "document integrity check failed: sha256 mismatch",
+        ));
+    }
+
+    // Build response with appropriate headers
+    let content_disposition = format!("attachment; filename=\"{}\"", sanitize_filename(&title));
+
+    Ok((
+        StatusCode::OK,
+        [
+            (header::CONTENT_TYPE, mime_type),
+            (header::CONTENT_DISPOSITION, content_disposition),
+            (
+                header::HeaderName::from_static("x-document-sha256"),
+                actual_sha256,
+            ),
+            (
+                header::HeaderName::from_static("x-request-id"),
+                request_id.0.to_string(),
+            ),
+        ],
+        Body::from(bytes),
+    ))
+}
+
+fn compute_sha256(data: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(data);
+    hex::encode(hasher.finalize())
+}
+
+fn sanitize_filename(name: &str) -> String {
+    name.chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' || c == '.' || c == ' ' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
 }
 
 async fn list_documents(
@@ -1145,5 +1403,66 @@ mod tests {
             },
         )
         .await;
+    }
+
+    #[tokio::test]
+    async fn local_fs_storage_put_get_exists() {
+        let dir = std::env::temp_dir().join(format!("vault-storage-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let storage = LocalFsStorage::new(dir.clone());
+
+        let key = "test-doc-1";
+        let data = b"hello world";
+
+        // Initially doesn't exist
+        assert!(!storage.exists(key).await.unwrap());
+
+        // Put data
+        storage.put(key, data).await.unwrap();
+
+        // Now exists
+        assert!(storage.exists(key).await.unwrap());
+
+        // Get returns same data
+        let retrieved = storage.get(key).await.unwrap();
+        assert_eq!(retrieved, data);
+
+        // Cleanup
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn local_fs_storage_handles_file_url() {
+        let dir = std::env::temp_dir().join(format!("vault-storage-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let storage = LocalFsStorage::new(dir.clone());
+
+        let file_path = dir.join("my-file");
+        std::fs::write(&file_path, b"content").unwrap();
+
+        let key = format!("file://{}", file_path.display());
+        let retrieved = storage.get(&key).await.unwrap();
+        assert_eq!(retrieved, b"content");
+
+        // Cleanup
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn compute_sha256_returns_correct_hash() {
+        let hash = compute_sha256(b"hello");
+        // Known SHA256 of "hello"
+        assert_eq!(
+            hash,
+            "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+        );
+    }
+
+    #[test]
+    fn sanitize_filename_removes_special_chars() {
+        assert_eq!(sanitize_filename("hello.pdf"), "hello.pdf");
+        assert_eq!(sanitize_filename("my file.pdf"), "my file.pdf");
+        assert_eq!(sanitize_filename("file/with/path"), "file_with_path");
+        assert_eq!(sanitize_filename("file<>:\"\\"), "file_____");
     }
 }

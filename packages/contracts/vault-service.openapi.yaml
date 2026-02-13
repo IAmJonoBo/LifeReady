@@ -159,6 +159,52 @@ paths:
           $ref: "./common.openapi.yaml#/components/responses/NotFound"
         "500":
           $ref: "./common.openapi.yaml#/components/responses/ServerError"
+  /v1/documents/{document_id}/download:
+    get:
+      tags: [documents]
+      security:
+        - bearerAuth: []
+      summary: Download document content (re-verifies sha256 on read)
+      parameters:
+        - in: path
+          name: document_id
+          required: true
+          schema:
+            $ref: "#/components/schemas/Uuid"
+        - in: query
+          name: version_id
+          required: false
+          schema:
+            $ref: "#/components/schemas/Uuid"
+          description: Optional version to download; defaults to latest
+      responses:
+        "200":
+          description: Document bytes
+          headers:
+            X-Request-Id:
+              $ref: "./common.openapi.yaml#/components/headers/X-Request-Id"
+            Content-Disposition:
+              schema:
+                type: string
+            X-Document-Sha256:
+              description: SHA256 checksum of returned content
+              schema:
+                $ref: "#/components/schemas/Sha256"
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "400":
+          $ref: "./common.openapi.yaml#/components/responses/ProblemDetailsResponse"
+        "401":
+          $ref: "./common.openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "./common.openapi.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "./common.openapi.yaml#/components/responses/NotFound"
+        "500":
+          $ref: "./common.openapi.yaml#/components/responses/ServerError"
 components:
   securitySchemes:
     bearerAuth:
