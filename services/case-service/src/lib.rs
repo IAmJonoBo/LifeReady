@@ -1,17 +1,17 @@
 use axum::{
+    Json, Router,
     extract::{Extension, Path, State},
     http::StatusCode,
     routing::{get, post, put},
-    Json, Router,
 };
 use chrono::Utc;
 use lifeready_auth::{
-    conflict, invalid_request, not_found, request_id_middleware, AuthConfig, AuthLayer,
-    RequestContext, RequestId,
+    AuthConfig, AuthLayer, RequestContext, RequestId, conflict, invalid_request, not_found,
+    request_id_middleware,
 };
 use lifeready_policy::{
-    require_role, require_scope, require_scope_any, require_tier, Role, SensitivityTier,
-    TierRequirement,
+    Role, SensitivityTier, TierRequirement, require_role, require_scope, require_scope_any,
+    require_tier,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -22,8 +22,8 @@ use std::io::Write;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::{path::PathBuf, str::FromStr};
-use zip::write::SimpleFileOptions;
 use zip::ZipWriter;
+use zip::write::SimpleFileOptions;
 
 #[derive(Clone)]
 struct AppState {
@@ -48,6 +48,11 @@ pub fn router() -> Router {
         .route("/readyz", get(readyz))
         .route("/v1/cases/emergency-pack", post(create_emergency_pack))
         .route("/v1/cases/mhca39", post(create_mhca39))
+        .route("/v1/cases/will-prep-sa", post(create_will_prep_sa))
+        .route(
+            "/v1/cases/deceased-estate-sa",
+            post(create_deceased_estate_sa),
+        )
         .route("/v1/cases/{case_id}/export", post(export_case))
         .route(
             "/v1/cases/{case_id}/evidence/{slot_name}",
@@ -101,6 +106,22 @@ struct Mhca39Create {
     subject_person_id: String,
     applicant_person_id: String,
     relationship_to_subject: Option<String>,
+    notes: Option<String>,
+    required_evidence_slots: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct WillPrepCreate {
+    principal_person_id: String,
+    notes: Option<String>,
+    required_evidence_slots: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct DeceasedEstateCreate {
+    deceased_person_id: String,
+    executor_person_id: String,
+    estimated_estate_value_zar: Option<f64>,
     notes: Option<String>,
     required_evidence_slots: Option<Vec<String>>,
 }
@@ -300,6 +321,186 @@ async fn create_mhca39(
     Ok((StatusCode::CREATED, Json(response)))
 }
 
+async fn create_will_prep_sa(
+    State(state): State<AppState>,
+    ctx: RequestContext,
+    Extension(request_id): Extension<RequestId>,
+    Json(payload): Json<WillPrepCreate>,
+) -> Result<(StatusCode, Json<CaseResponse>), axum::response::Response> {
+    let pool = match &state.pool {
+        Some(pool) => pool,
+        None => return Err(invalid_request(Some(request_id), "database unavailable")),
+    };
+    require_role(&ctx, &[Role::Principal, Role::Proxy])
+        .map_err(|error| error.into_response(Some(request_id)))?;
+    require_tier(&ctx, TierRequirement::Min(SensitivityTier::Amber))
+        .map_err(|error| error.into_response(Some(request_id)))?;
+    require_scope(&ctx, "write:limited").map_err(|error| error.into_response(Some(request_id)))?;
+
+    let principal_id = parse_uuid(&ctx.principal_id)
+        .ok_or_else(|| invalid_request(Some(request_id), "invalid principal_id"))?;
+    let principal_person_id = parse_uuid(&payload.principal_person_id)
+        .ok_or_else(|| invalid_request(Some(request_id), "invalid principal_person_id"))?;
+    let required_slots = payload
+        .required_evidence_slots
+        .clone()
+        .unwrap_or_else(default_will_prep_slots);
+
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|error| db_error_to_response(error, request_id))?;
+    let row = sqlx::query(
+        "INSERT INTO cases (principal_id, case_type, status, blocked_reasons) \
+         VALUES ($1, 'will_prep_sa', 'blocked', ARRAY['evidence incomplete']) \
+         RETURNING case_id, created_at, status, blocked_reasons",
+    )
+    .bind(principal_id)
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(|error| db_error_to_response(error, request_id))?;
+
+    let case_id: uuid::Uuid = row
+        .try_get("case_id")
+        .map_err(|error| db_error_to_response(error, request_id))?;
+    let created_at: chrono::DateTime<Utc> = row
+        .try_get("created_at")
+        .map_err(|error| db_error_to_response(error, request_id))?;
+    let status: String = row
+        .try_get("status")
+        .map_err(|error| db_error_to_response(error, request_id))?;
+    let blocked_reasons: Vec<String> = row
+        .try_get("blocked_reasons")
+        .map_err(|error| db_error_to_response(error, request_id))?;
+
+    sqlx::query(
+        "INSERT INTO will_prep_cases (case_id, principal_person_id, required_evidence_slots, notes) \
+         VALUES ($1, $2, $3, $4)",
+    )
+    .bind(case_id)
+    .bind(principal_person_id)
+    .bind(required_slots.clone())
+    .bind(payload.notes)
+    .execute(&mut *tx)
+    .await
+    .map_err(|error| db_error_to_response(error, request_id))?;
+
+    for slot in &required_slots {
+        sqlx::query("INSERT INTO case_evidence (case_id, slot_name) VALUES ($1, $2)")
+            .bind(case_id)
+            .bind(slot)
+            .execute(&mut *tx)
+            .await
+            .map_err(|error| db_error_to_response(error, request_id))?;
+    }
+
+    tx.commit()
+        .await
+        .map_err(|error| db_error_to_response(error, request_id))?;
+
+    let response = CaseResponse {
+        case_id: case_id.to_string(),
+        case_type: "will_prep_sa".into(),
+        status,
+        created_at: created_at.to_rfc3339(),
+        blocked_reasons,
+    };
+
+    Ok((StatusCode::CREATED, Json(response)))
+}
+
+async fn create_deceased_estate_sa(
+    State(state): State<AppState>,
+    ctx: RequestContext,
+    Extension(request_id): Extension<RequestId>,
+    Json(payload): Json<DeceasedEstateCreate>,
+) -> Result<(StatusCode, Json<CaseResponse>), axum::response::Response> {
+    let pool = match &state.pool {
+        Some(pool) => pool,
+        None => return Err(invalid_request(Some(request_id), "database unavailable")),
+    };
+    require_role(&ctx, &[Role::Principal, Role::Proxy])
+        .map_err(|error| error.into_response(Some(request_id)))?;
+    require_tier(&ctx, TierRequirement::Min(SensitivityTier::Amber))
+        .map_err(|error| error.into_response(Some(request_id)))?;
+    require_scope(&ctx, "write:limited").map_err(|error| error.into_response(Some(request_id)))?;
+
+    let principal_id = parse_uuid(&ctx.principal_id)
+        .ok_or_else(|| invalid_request(Some(request_id), "invalid principal_id"))?;
+    let deceased_person_id = parse_uuid(&payload.deceased_person_id)
+        .ok_or_else(|| invalid_request(Some(request_id), "invalid deceased_person_id"))?;
+    let executor_person_id = parse_uuid(&payload.executor_person_id)
+        .ok_or_else(|| invalid_request(Some(request_id), "invalid executor_person_id"))?;
+    let required_slots = payload
+        .required_evidence_slots
+        .clone()
+        .unwrap_or_else(default_deceased_estate_slots);
+
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|error| db_error_to_response(error, request_id))?;
+    let row = sqlx::query(
+        "INSERT INTO cases (principal_id, case_type, status, blocked_reasons) \
+         VALUES ($1, 'deceased_estate_reporting_sa', 'blocked', ARRAY['evidence incomplete']) \
+         RETURNING case_id, created_at, status, blocked_reasons",
+    )
+    .bind(principal_id)
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(|error| db_error_to_response(error, request_id))?;
+
+    let case_id: uuid::Uuid = row
+        .try_get("case_id")
+        .map_err(|error| db_error_to_response(error, request_id))?;
+    let created_at: chrono::DateTime<Utc> = row
+        .try_get("created_at")
+        .map_err(|error| db_error_to_response(error, request_id))?;
+    let status: String = row
+        .try_get("status")
+        .map_err(|error| db_error_to_response(error, request_id))?;
+    let blocked_reasons: Vec<String> = row
+        .try_get("blocked_reasons")
+        .map_err(|error| db_error_to_response(error, request_id))?;
+
+    sqlx::query(
+        "INSERT INTO deceased_estate_cases (case_id, deceased_person_id, executor_person_id, estimated_estate_value_zar, required_evidence_slots, notes) \
+         VALUES ($1, $2, $3, $4, $5, $6)",
+    )
+    .bind(case_id)
+    .bind(deceased_person_id)
+    .bind(executor_person_id)
+    .bind(payload.estimated_estate_value_zar)
+    .bind(required_slots.clone())
+    .bind(payload.notes)
+    .execute(&mut *tx)
+    .await
+    .map_err(|error| db_error_to_response(error, request_id))?;
+
+    for slot in &required_slots {
+        sqlx::query("INSERT INTO case_evidence (case_id, slot_name) VALUES ($1, $2)")
+            .bind(case_id)
+            .bind(slot)
+            .execute(&mut *tx)
+            .await
+            .map_err(|error| db_error_to_response(error, request_id))?;
+    }
+
+    tx.commit()
+        .await
+        .map_err(|error| db_error_to_response(error, request_id))?;
+
+    let response = CaseResponse {
+        case_id: case_id.to_string(),
+        case_type: "deceased_estate_reporting_sa".into(),
+        status,
+        created_at: created_at.to_rfc3339(),
+        blocked_reasons,
+    };
+
+    Ok((StatusCode::CREATED, Json(response)))
+}
+
 async fn attach_evidence(
     State(state): State<AppState>,
     ctx: RequestContext,
@@ -336,17 +537,27 @@ async fn attach_evidence(
         return Err(not_found(Some(request_id), "document not found"));
     }
 
-    let row = sqlx::query(
-        "UPDATE mhca39_evidence SET document_id = $1, added_at = now() \
+    // Determine case type to update the correct evidence table.
+    // Table names are compile-time literals from the match below, not user input.
+    let case_type = fetch_case_type(pool, case_id, request_id).await?;
+    let evidence_table = match case_type.as_str() {
+        "mhca39" => "mhca39_evidence",
+        _ => "case_evidence",
+    };
+
+    let query = format!(
+        "UPDATE {} SET document_id = $1, added_at = now() \
          WHERE case_id = $2 AND slot_name = $3 \
          RETURNING slot_name, document_id, added_at",
-    )
-    .bind(document_id)
-    .bind(case_id)
-    .bind(&slot_name)
-    .fetch_optional(pool)
-    .await
-    .map_err(|error| db_error_to_response(error, request_id))?;
+        evidence_table
+    );
+    let row = sqlx::query(&query)
+        .bind(document_id)
+        .bind(case_id)
+        .bind(&slot_name)
+        .fetch_optional(pool)
+        .await
+        .map_err(|error| db_error_to_response(error, request_id))?;
 
     let row = match row {
         Some(row) => row,
@@ -393,45 +604,98 @@ async fn export_case(
         .ok_or_else(|| invalid_request(Some(request_id), "invalid principal_id"))?;
     ensure_case_access(pool, case_id, principal_id, request_id).await?;
 
-    let required_slots =
-        sqlx::query("SELECT required_evidence_slots FROM mhca39_cases WHERE case_id = $1")
+    // Determine case type to fetch from the correct tables
+    let case_type = fetch_case_type(pool, case_id, request_id).await?;
+    let (evidence_table, slots_query, required_slots) = match case_type.as_str() {
+        "mhca39" => {
+            let row =
+                sqlx::query("SELECT required_evidence_slots FROM mhca39_cases WHERE case_id = $1")
+                    .bind(case_id)
+                    .fetch_optional(pool)
+                    .await
+                    .map_err(|error| db_error_to_response(error, request_id))?;
+            let slots: Vec<String> = match row {
+                Some(r) => r
+                    .try_get("required_evidence_slots")
+                    .map_err(|error| db_error_to_response(error, request_id))?,
+                None => return Err(not_found(Some(request_id), "mhca39 case not found")),
+            };
+            ("mhca39_evidence", "mhca39_evidence", slots)
+        }
+        "will_prep_sa" => {
+            let row = sqlx::query(
+                "SELECT required_evidence_slots FROM will_prep_cases WHERE case_id = $1",
+            )
             .bind(case_id)
             .fetch_optional(pool)
             .await
             .map_err(|error| db_error_to_response(error, request_id))?;
-
-    let required_slots: Vec<String> = match required_slots {
-        Some(row) => row
-            .try_get("required_evidence_slots")
-            .map_err(|error| db_error_to_response(error, request_id))?,
-        None => return Err(not_found(Some(request_id), "mhca39 case not found")),
+            let slots: Vec<String> = match row {
+                Some(r) => r
+                    .try_get("required_evidence_slots")
+                    .map_err(|error| db_error_to_response(error, request_id))?,
+                None => return Err(not_found(Some(request_id), "will_prep_sa case not found")),
+            };
+            ("case_evidence", "case_evidence", slots)
+        }
+        "deceased_estate_reporting_sa" => {
+            let row = sqlx::query(
+                "SELECT required_evidence_slots FROM deceased_estate_cases WHERE case_id = $1",
+            )
+            .bind(case_id)
+            .fetch_optional(pool)
+            .await
+            .map_err(|error| db_error_to_response(error, request_id))?;
+            let slots: Vec<String> = match row {
+                Some(r) => r
+                    .try_get("required_evidence_slots")
+                    .map_err(|error| db_error_to_response(error, request_id))?,
+                None => {
+                    return Err(not_found(
+                        Some(request_id),
+                        "deceased_estate case not found",
+                    ));
+                }
+            };
+            ("case_evidence", "case_evidence", slots)
+        }
+        _ => {
+            return Err(invalid_request(
+                Some(request_id),
+                "unsupported case type for export",
+            ));
+        }
     };
 
-    let missing_slots = sqlx::query(
-        "SELECT slot_name FROM mhca39_evidence WHERE case_id = $1 AND document_id IS NULL",
-    )
-    .bind(case_id)
-    .fetch_all(pool)
-    .await
-    .map_err(|error| db_error_to_response(error, request_id))?;
+    let missing_query = format!(
+        "SELECT slot_name FROM {} WHERE case_id = $1 AND document_id IS NULL",
+        evidence_table
+    );
+    let missing_slots = sqlx::query(&missing_query)
+        .bind(case_id)
+        .fetch_all(pool)
+        .await
+        .map_err(|error| db_error_to_response(error, request_id))?;
     if !missing_slots.is_empty() {
         return Err(conflict(Some(request_id), "evidence slots incomplete"));
     }
 
-    let rows = sqlx::query(
+    let evidence_join_query = format!(
         "SELECT e.slot_name, e.document_id, d.document_type, d.title, v.sha256, v.blob_ref \
-         FROM mhca39_evidence e \
+         FROM {} e \
          JOIN documents d ON d.document_id = e.document_id \
          JOIN LATERAL ( \
             SELECT sha256, blob_ref FROM document_versions \
             WHERE document_id = e.document_id ORDER BY created_at DESC LIMIT 1 \
          ) v ON true \
          WHERE e.case_id = $1 ORDER BY e.slot_name",
-    )
-    .bind(case_id)
-    .fetch_all(pool)
-    .await
-    .map_err(|error| db_error_to_response(error, request_id))?;
+        slots_query
+    );
+    let rows = sqlx::query(&evidence_join_query)
+        .bind(case_id)
+        .fetch_all(pool)
+        .await
+        .map_err(|error| db_error_to_response(error, request_id))?;
 
     if rows.len() != required_slots.len() {
         return Err(conflict(Some(request_id), "evidence versions missing"));
@@ -503,24 +767,72 @@ async fn export_case(
     let audit_sha256 = sha256_file(&audit_path)
         .map_err(|error| invalid_request(Some(request_id), error.to_string()))?;
 
-    // Generate MHCA39 template output (structured JSON + markdown instructions)
-    let mhca39_template = generate_mhca39_template(pool, case_id, &manifest_documents, request_id).await?;
-    let template_path = export_dir.join("MHCA39_draft.json");
-    let template_bytes = serde_json::to_vec_pretty(&mhca39_template)
-        .map_err(|error| invalid_request(Some(request_id), error.to_string()))?;
+    // Generate type-specific template output and instructions
+    let (template_filename, template_bytes, instructions_filename, instructions) = match case_type
+        .as_str()
+    {
+        "mhca39" => {
+            let mhca39_template =
+                generate_mhca39_template(pool, case_id, &manifest_documents, request_id).await?;
+            let t_bytes = serde_json::to_vec_pretty(&mhca39_template)
+                .map_err(|error| invalid_request(Some(request_id), error.to_string()))?;
+            let instr = generate_mhca39_instructions(&mhca39_template);
+            (
+                "MHCA39_draft.json".to_string(),
+                t_bytes,
+                "MHCA39_instructions.md".to_string(),
+                instr,
+            )
+        }
+        "will_prep_sa" => {
+            let template =
+                generate_will_prep_template(pool, case_id, &manifest_documents, request_id).await?;
+            let t_bytes = serde_json::to_vec_pretty(&template)
+                .map_err(|error| invalid_request(Some(request_id), error.to_string()))?;
+            let instr = generate_will_prep_instructions();
+            (
+                "will_prep_draft.json".to_string(),
+                t_bytes,
+                "witnessing_instructions.md".to_string(),
+                instr,
+            )
+        }
+        "deceased_estate_reporting_sa" => {
+            let template =
+                generate_deceased_estate_template(pool, case_id, &manifest_documents, request_id)
+                    .await?;
+            let t_bytes = serde_json::to_vec_pretty(&template)
+                .map_err(|error| invalid_request(Some(request_id), error.to_string()))?;
+            let estimated_value = template.estimated_estate_value_zar;
+            let instr = generate_deceased_estate_instructions(estimated_value);
+            (
+                "deceased_estate_draft.json".to_string(),
+                t_bytes,
+                "instructions.md".to_string(),
+                instr,
+            )
+        }
+        _ => {
+            return Err(invalid_request(
+                Some(request_id),
+                "unsupported case type for export",
+            ));
+        }
+    };
+
+    let template_path = export_dir.join(&template_filename);
     fs::write(&template_path, &template_bytes)
         .map_err(|error| invalid_request(Some(request_id), error.to_string()))?;
     let template_sha256 = sha256_bytes(&template_bytes);
 
-    let instructions_path = export_dir.join("MHCA39_instructions.md");
-    let instructions = generate_mhca39_instructions(&mhca39_template);
+    let instructions_path = export_dir.join(&instructions_filename);
     fs::write(&instructions_path, &instructions)
         .map_err(|error| invalid_request(Some(request_id), error.to_string()))?;
     let instructions_sha256 = sha256_bytes(instructions.as_bytes());
 
     let manifest = ExportManifest {
         case_id: case_id.to_string(),
-        case_type: "mhca39".into(),
+        case_type: case_type.clone(),
         exported_at: Utc::now().to_rfc3339(),
         audit_head_hash: audit_head_hash.clone(),
         audit_events_sha256: audit_sha256.clone(),
@@ -538,8 +850,11 @@ async fn export_case(
     let mut checksums = Vec::new();
     checksums.push(format!("{}  manifest.json", manifest_sha256));
     checksums.push(format!("{}  audit.jsonl", audit_sha256));
-    checksums.push(format!("{}  MHCA39_draft.json", template_sha256));
-    checksums.push(format!("{}  MHCA39_instructions.md", instructions_sha256));
+    checksums.push(format!("{}  {}", template_sha256, template_filename));
+    checksums.push(format!(
+        "{}  {}",
+        instructions_sha256, instructions_filename
+    ));
     for doc in &manifest_documents {
         checksums.push(format!("{}  {}", doc.sha256, doc.bundle_path));
     }
@@ -551,11 +866,18 @@ async fn export_case(
     create_zip(&export_dir, &zip_path)
         .map_err(|error| invalid_request(Some(request_id), error.to_string()))?;
 
+    let artifact_kind = match case_type.as_str() {
+        "mhca39" => "mhca39_export",
+        "will_prep_sa" => "will_prep_export",
+        "deceased_estate_reporting_sa" => "deceased_estate_export",
+        _ => "case_export",
+    };
+
     sqlx::query(
         "INSERT INTO case_artifacts (case_id, kind, blob_ref, sha256) VALUES ($1, $2, $3, $4)",
     )
     .bind(case_id)
-    .bind("mhca39_export")
+    .bind(artifact_kind)
     .bind(zip_path.to_string_lossy().to_string())
     .bind(&manifest_sha256)
     .execute(pool)
@@ -730,7 +1052,9 @@ fn generate_mhca39_instructions(template: &Mhca39Template) -> String {
     md.push_str("## Next Steps\n\n");
     md.push_str("1. Review all documents in the `documents/` folder\n");
     md.push_str("2. Complete the official MHCA 39 form from the Master of the High Court\n");
-    md.push_str("3. Have the applicant swear/affirm the application before a Commissioner of Oaths\n");
+    md.push_str(
+        "3. Have the applicant swear/affirm the application before a Commissioner of Oaths\n",
+    );
     md.push_str("4. Submit the application with this evidence pack to the Master's Office\n");
     md.push_str("5. Retain this pack and the `checksums.txt` for verification purposes\n\n");
 
@@ -740,6 +1064,273 @@ fn generate_mhca39_instructions(template: &Mhca39Template) -> String {
     md.push_str("audit-verifier verify-bundle --bundle <path-to-export>\n");
     md.push_str("```\n");
 
+    md
+}
+
+/// Will prep template output structure
+#[derive(Debug, Serialize, Deserialize)]
+struct WillPrepTemplate {
+    case_id: String,
+    exported_at: String,
+    principal_person_id: String,
+    notes: Option<String>,
+    evidence_checklist: Vec<EvidenceChecklistItem>,
+    disclaimer: String,
+}
+
+async fn generate_will_prep_template(
+    pool: &PgPool,
+    case_id: uuid::Uuid,
+    _manifest_documents: &[ManifestDocument],
+    request_id: RequestId,
+) -> Result<WillPrepTemplate, axum::response::Response> {
+    let case_row = sqlx::query(
+        "SELECT w.principal_person_id, w.notes, w.required_evidence_slots \
+         FROM will_prep_cases w WHERE w.case_id = $1",
+    )
+    .bind(case_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|error| db_error_to_response(error, request_id))?;
+
+    let case_row = match case_row {
+        Some(row) => row,
+        None => return Err(not_found(Some(request_id), "will_prep_sa case not found")),
+    };
+
+    let principal_person_id: uuid::Uuid = case_row
+        .try_get("principal_person_id")
+        .map_err(|error| db_error_to_response(error, request_id))?;
+    let notes: Option<String> = case_row
+        .try_get("notes")
+        .map_err(|error| db_error_to_response(error, request_id))?;
+    let required_slots: Vec<String> = case_row
+        .try_get("required_evidence_slots")
+        .map_err(|error| db_error_to_response(error, request_id))?;
+
+    let evidence_rows = sqlx::query(
+        "SELECT e.slot_name, e.document_id, d.document_type, d.title \
+         FROM case_evidence e \
+         LEFT JOIN documents d ON d.document_id = e.document_id \
+         WHERE e.case_id = $1 \
+         ORDER BY e.slot_name",
+    )
+    .bind(case_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|error| db_error_to_response(error, request_id))?;
+
+    let mut checklist = Vec::new();
+    for row in evidence_rows {
+        let slot_name: String = row
+            .try_get("slot_name")
+            .map_err(|error| db_error_to_response(error, request_id))?;
+        let document_id: Option<uuid::Uuid> = row
+            .try_get("document_id")
+            .map_err(|error| db_error_to_response(error, request_id))?;
+        let document_type: Option<String> = row
+            .try_get("document_type")
+            .map_err(|error| db_error_to_response(error, request_id))?;
+        let title: Option<String> = row
+            .try_get("title")
+            .map_err(|error| db_error_to_response(error, request_id))?;
+
+        checklist.push(EvidenceChecklistItem {
+            slot_name: slot_name.clone(),
+            required: required_slots.contains(&slot_name),
+            attached: document_id.is_some(),
+            document_id: document_id.map(|id| id.to_string()),
+            document_type,
+            title,
+        });
+    }
+
+    Ok(WillPrepTemplate {
+        case_id: case_id.to_string(),
+        exported_at: Utc::now().to_rfc3339(),
+        principal_person_id: principal_person_id.to_string(),
+        notes,
+        evidence_checklist: checklist,
+        disclaimer: "DISCLAIMER: This pack is generated by LifeReady SA for preparation purposes only. \
+            It does NOT constitute legal advice. Consult a qualified legal professional for will execution. \
+            LifeReady SA does not provide legal advice."
+            .to_string(),
+    })
+}
+
+fn generate_will_prep_instructions() -> String {
+    let mut md = String::new();
+    md.push_str("# Will Preparation Pack — SA Witnessing Instructions\n\n");
+    md.push_str("## Overview\n");
+    md.push_str("This export pack contains draft will documents and supporting schedules.\n\n");
+    md.push_str("## SA Witnessing Formalities\n");
+    md.push_str("Under South African law, a valid will requires:\n");
+    md.push_str("1. The testator must sign the will at the end of the last page, in the presence of two competent witnesses\n");
+    md.push_str("2. Both witnesses must be present simultaneously when the testator signs\n");
+    md.push_str(
+        "3. Each witness must sign the will in the presence of the testator and of each other\n",
+    );
+    md.push_str("4. Every page of the will must be signed by the testator and both witnesses\n");
+    md.push_str(
+        "5. If the testator cannot sign, a commissioner of oaths may sign on their behalf\n\n",
+    );
+    md.push_str("## Important\n");
+    md.push_str(
+        "> DISCLAIMER: This pack is generated by LifeReady SA for preparation purposes only.\n",
+    );
+    md.push_str("> It does NOT constitute legal advice. Consult a qualified legal professional for will execution.\n");
+    md.push_str("> LifeReady SA does not provide legal advice.\n\n");
+    md.push_str("## Verification\n");
+    md.push_str("Use the `audit-verifier` CLI to verify bundle integrity.\n");
+    md
+}
+
+/// Deceased estate template output structure
+#[derive(Debug, Serialize, Deserialize)]
+struct DeceasedEstateTemplate {
+    case_id: String,
+    exported_at: String,
+    deceased_person_id: String,
+    executor_person_id: String,
+    estimated_estate_value_zar: Option<f64>,
+    notes: Option<String>,
+    evidence_checklist: Vec<EvidenceChecklistItem>,
+    disclaimer: String,
+}
+
+async fn generate_deceased_estate_template(
+    pool: &PgPool,
+    case_id: uuid::Uuid,
+    _manifest_documents: &[ManifestDocument],
+    request_id: RequestId,
+) -> Result<DeceasedEstateTemplate, axum::response::Response> {
+    let case_row = sqlx::query(
+        "SELECT d.deceased_person_id, d.executor_person_id, d.estimated_estate_value_zar, d.notes, d.required_evidence_slots \
+         FROM deceased_estate_cases d WHERE d.case_id = $1",
+    )
+    .bind(case_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|error| db_error_to_response(error, request_id))?;
+
+    let case_row = match case_row {
+        Some(row) => row,
+        None => {
+            return Err(not_found(
+                Some(request_id),
+                "deceased_estate case not found",
+            ));
+        }
+    };
+
+    let deceased_person_id: uuid::Uuid = case_row
+        .try_get("deceased_person_id")
+        .map_err(|error| db_error_to_response(error, request_id))?;
+    let executor_person_id: uuid::Uuid = case_row
+        .try_get("executor_person_id")
+        .map_err(|error| db_error_to_response(error, request_id))?;
+    let estimated_estate_value_zar: Option<rust_decimal::Decimal> = case_row
+        .try_get("estimated_estate_value_zar")
+        .map_err(|error| db_error_to_response(error, request_id))?;
+    let notes: Option<String> = case_row
+        .try_get("notes")
+        .map_err(|error| db_error_to_response(error, request_id))?;
+    let required_slots: Vec<String> = case_row
+        .try_get("required_evidence_slots")
+        .map_err(|error| db_error_to_response(error, request_id))?;
+
+    let evidence_rows = sqlx::query(
+        "SELECT e.slot_name, e.document_id, d.document_type, d.title \
+         FROM case_evidence e \
+         LEFT JOIN documents d ON d.document_id = e.document_id \
+         WHERE e.case_id = $1 \
+         ORDER BY e.slot_name",
+    )
+    .bind(case_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|error| db_error_to_response(error, request_id))?;
+
+    let mut checklist = Vec::new();
+    for row in evidence_rows {
+        let slot_name: String = row
+            .try_get("slot_name")
+            .map_err(|error| db_error_to_response(error, request_id))?;
+        let document_id: Option<uuid::Uuid> = row
+            .try_get("document_id")
+            .map_err(|error| db_error_to_response(error, request_id))?;
+        let document_type: Option<String> = row
+            .try_get("document_type")
+            .map_err(|error| db_error_to_response(error, request_id))?;
+        let title: Option<String> = row
+            .try_get("title")
+            .map_err(|error| db_error_to_response(error, request_id))?;
+
+        checklist.push(EvidenceChecklistItem {
+            slot_name: slot_name.clone(),
+            required: required_slots.contains(&slot_name),
+            attached: document_id.is_some(),
+            document_id: document_id.map(|id| id.to_string()),
+            document_type,
+            title,
+        });
+    }
+
+    Ok(DeceasedEstateTemplate {
+        case_id: case_id.to_string(),
+        exported_at: Utc::now().to_rfc3339(),
+        deceased_person_id: deceased_person_id.to_string(),
+        executor_person_id: executor_person_id.to_string(),
+        estimated_estate_value_zar: match estimated_estate_value_zar {
+            Some(v) => {
+                use rust_decimal::prelude::ToPrimitive;
+                Some(v.to_f64().ok_or_else(|| {
+                    invalid_request(Some(request_id), "estate value out of f64 range")
+                })?)
+            }
+            None => None,
+        },
+        notes,
+        evidence_checklist: checklist,
+        disclaimer:
+            "DISCLAIMER: This pack is generated by LifeReady SA for preparation purposes only. \
+            It does NOT constitute legal advice or claim executor appointment. \
+            LifeReady SA does not provide legal advice."
+                .to_string(),
+    })
+}
+
+fn generate_deceased_estate_instructions(estimated_value: Option<f64>) -> String {
+    let mut md = String::new();
+    md.push_str("# Deceased Estate Reporting Pack — SA Instructions\n\n");
+    md.push_str("## Overview\n");
+    md.push_str("This export contains documents required for reporting a deceased estate in South Africa.\n\n");
+    md.push_str("## Estimated Estate Value\n");
+    md.push_str("Based on the captured estimated estate value:\n");
+    match estimated_value {
+        Some(value) if value > 250_000.0 => {
+            md.push_str("- If the estate value exceeds R250,000 or if there is a valid will: Apply for **Letters of Executorship** from the Master of the High Court\n");
+        }
+        Some(_) => {
+            md.push_str("- If the estate value is R250,000 or below and there is no will: Apply for **Letters of Authority** from the Master of the High Court\n");
+        }
+        None => {
+            md.push_str("- If the estate value exceeds R250,000 or if there is a valid will: Apply for **Letters of Executorship** from the Master of the High Court\n");
+            md.push_str("- If the estate value is R250,000 or below and there is no will: Apply for **Letters of Authority** from the Master of the High Court\n");
+        }
+    }
+    md.push_str("\n## Required Steps\n");
+    md.push_str("1. Report the death to the Department of Home Affairs within 72 hours\n");
+    md.push_str("2. Report the estate to the Master of the High Court within 14 days\n");
+    md.push_str("3. Submit the required documents (see manifest)\n\n");
+    md.push_str("## Important\n");
+    md.push_str(
+        "> DISCLAIMER: This pack is generated by LifeReady SA for preparation purposes only.\n",
+    );
+    md.push_str("> It does NOT constitute legal advice or claim executor appointment.\n");
+    md.push_str("> LifeReady SA does not provide legal advice.\n\n");
+    md.push_str("## Verification\n");
+    md.push_str("Use the `audit-verifier` CLI to verify bundle integrity.\n");
     md
 }
 
@@ -806,12 +1397,35 @@ fn parse_uuid(value: &str) -> Option<uuid::Uuid> {
 
 fn default_mhca39_slots() -> Vec<String> {
     vec![
-        "id_subject".into(),
-        "id_applicant".into(),
-        "address_subject".into(),
-        "asset_summary".into(),
-        "medical_evidence_1".into(),
-        "medical_evidence_2".into(),
+        "medical_certificate_1".into(),
+        "medical_certificate_2".into(),
+        "assets_income_schedule".into(),
+        "applicant_id_copy".into(),
+        "patient_id_copy".into(),
+        "supporting_affidavit".into(),
+        "mhca39_form_data".into(),
+    ]
+}
+
+fn default_will_prep_slots() -> Vec<String> {
+    vec![
+        "draft_will_document".into(),
+        "asset_schedule".into(),
+        "beneficiary_schedule".into(),
+        "executor_nomination".into(),
+        "witness_instruction_ack".into(),
+    ]
+}
+
+fn default_deceased_estate_slots() -> Vec<String> {
+    vec![
+        "death_certificate".into(),
+        "id_of_deceased".into(),
+        "id_of_executor".into(),
+        "original_will".into(),
+        "inventory_assets_liabilities".into(),
+        "nomination_acceptance".into(),
+        "proof_of_address_executor".into(),
     ]
 }
 
@@ -836,12 +1450,18 @@ fn sha256_file(path: &PathBuf) -> Result<String, std::io::Error> {
     Ok(sha256_bytes(&bytes))
 }
 
-fn create_zip(source_dir: &std::path::Path, zip_path: &std::path::Path) -> Result<(), std::io::Error> {
+fn create_zip(
+    source_dir: &std::path::Path,
+    zip_path: &std::path::Path,
+) -> Result<(), std::io::Error> {
     let file = fs::File::create(zip_path)?;
     let mut zip = ZipWriter::new(file);
     let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
 
-    for entry in walkdir::WalkDir::new(source_dir).into_iter().filter_map(|e| e.ok()) {
+    for entry in walkdir::WalkDir::new(source_dir)
+        .into_iter()
+        .filter_map(|e| e.ok())
+    {
         let path = entry.path();
         let relative = path
             .strip_prefix(source_dir)
@@ -897,6 +1517,26 @@ async fn ensure_case_access(
     }
 
     Ok(())
+}
+
+async fn fetch_case_type(
+    pool: &PgPool,
+    case_id: uuid::Uuid,
+    request_id: RequestId,
+) -> Result<String, axum::response::Response> {
+    let row = sqlx::query("SELECT case_type::text FROM cases WHERE case_id = $1")
+        .bind(case_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|error| db_error_to_response(error, request_id))?;
+
+    let row = match row {
+        Some(row) => row,
+        None => return Err(not_found(Some(request_id), "case not found")),
+    };
+
+    row.try_get::<String, _>("case_type")
+        .map_err(|error| db_error_to_response(error, request_id))
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -1064,9 +1704,9 @@ mod tests {
     #[test]
     fn default_mhca39_slots_contains_expected_items() {
         let slots = default_mhca39_slots();
-        assert!(slots.contains(&"id_subject".to_string()));
-        assert!(slots.contains(&"medical_evidence_1".to_string()));
-        assert!(slots.len() >= 6);
+        assert!(slots.contains(&"medical_certificate_1".to_string()));
+        assert!(slots.contains(&"mhca39_form_data".to_string()));
+        assert!(slots.len() >= 7);
     }
 
     #[test]
@@ -2048,6 +2688,197 @@ mod tests {
                     .unwrap();
 
                 assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+            },
+        )
+        .await;
+    }
+
+    #[test]
+    fn default_will_prep_slots_contains_expected_items() {
+        let slots = default_will_prep_slots();
+        assert!(slots.contains(&"draft_will_document".to_string()));
+        assert!(slots.contains(&"executor_nomination".to_string()));
+        assert!(slots.contains(&"witness_instruction_ack".to_string()));
+        assert_eq!(slots.len(), 5);
+    }
+
+    #[test]
+    fn default_deceased_estate_slots_contains_expected_items() {
+        let slots = default_deceased_estate_slots();
+        assert!(slots.contains(&"death_certificate".to_string()));
+        assert!(slots.contains(&"id_of_deceased".to_string()));
+        assert!(slots.contains(&"original_will".to_string()));
+        assert!(slots.contains(&"nomination_acceptance".to_string()));
+        assert_eq!(slots.len(), 7);
+    }
+
+    #[tokio::test]
+    async fn create_will_prep_sa_rejects_invalid_principal_person_id() {
+        with_env_async(
+            &[
+                ("LIFEREADY_ENV", Some("dev")),
+                ("JWT_SECRET", Some("test-secret-32-chars-minimum!!")),
+                (
+                    "DATABASE_URL",
+                    Some("postgres://postgres:postgres@127.0.0.1:5432/lifeready"),
+                ),
+            ],
+            || async {
+                let app = router();
+                let body = serde_json::json!({
+                    "principal_person_id": "not-a-uuid"
+                })
+                .to_string();
+                let response = axum::Router::into_service(app)
+                    .oneshot(
+                        Request::builder()
+                            .method("POST")
+                            .uri("/v1/cases/will-prep-sa")
+                            .header("content-type", "application/json")
+                            .header(
+                                "authorization",
+                                format!("Bearer {}", auth_token(AccessLevel::LimitedWrite)),
+                            )
+                            .body(Body::from(body))
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+
+                assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+            },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn create_will_prep_sa_rejects_insufficient_role() {
+        with_env_async(
+            &[
+                ("LIFEREADY_ENV", Some("dev")),
+                ("JWT_SECRET", Some("test-secret-32-chars-minimum!!")),
+                (
+                    "DATABASE_URL",
+                    Some("postgres://postgres:postgres@127.0.0.1:5432/lifeready"),
+                ),
+            ],
+            || async {
+                let app = router();
+                let body = serde_json::json!({
+                    "principal_person_id": "00000000-0000-0000-0000-000000000003"
+                })
+                .to_string();
+                let response = axum::Router::into_service(app)
+                    .oneshot(
+                        Request::builder()
+                            .method("POST")
+                            .uri("/v1/cases/will-prep-sa")
+                            .header("content-type", "application/json")
+                            .header(
+                                "authorization",
+                                format!(
+                                    "Bearer {}",
+                                    auth_token_with(
+                                        Role::EmergencyContact,
+                                        vec![SensitivityTier::Amber],
+                                        AccessLevel::LimitedWrite,
+                                    )
+                                ),
+                            )
+                            .body(Body::from(body))
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+
+                assert_eq!(response.status(), StatusCode::FORBIDDEN);
+            },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn create_deceased_estate_sa_rejects_invalid_deceased_person_id() {
+        with_env_async(
+            &[
+                ("LIFEREADY_ENV", Some("dev")),
+                ("JWT_SECRET", Some("test-secret-32-chars-minimum!!")),
+                (
+                    "DATABASE_URL",
+                    Some("postgres://postgres:postgres@127.0.0.1:5432/lifeready"),
+                ),
+            ],
+            || async {
+                let app = router();
+                let body = serde_json::json!({
+                    "deceased_person_id": "not-a-uuid",
+                    "executor_person_id": "00000000-0000-0000-0000-000000000002"
+                })
+                .to_string();
+                let response = axum::Router::into_service(app)
+                    .oneshot(
+                        Request::builder()
+                            .method("POST")
+                            .uri("/v1/cases/deceased-estate-sa")
+                            .header("content-type", "application/json")
+                            .header(
+                                "authorization",
+                                format!("Bearer {}", auth_token(AccessLevel::LimitedWrite)),
+                            )
+                            .body(Body::from(body))
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+
+                assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+            },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn create_deceased_estate_sa_rejects_insufficient_role() {
+        with_env_async(
+            &[
+                ("LIFEREADY_ENV", Some("dev")),
+                ("JWT_SECRET", Some("test-secret-32-chars-minimum!!")),
+                (
+                    "DATABASE_URL",
+                    Some("postgres://postgres:postgres@127.0.0.1:5432/lifeready"),
+                ),
+            ],
+            || async {
+                let app = router();
+                let body = serde_json::json!({
+                    "deceased_person_id": "00000000-0000-0000-0000-000000000003",
+                    "executor_person_id": "00000000-0000-0000-0000-000000000004"
+                })
+                .to_string();
+                let response = axum::Router::into_service(app)
+                    .oneshot(
+                        Request::builder()
+                            .method("POST")
+                            .uri("/v1/cases/deceased-estate-sa")
+                            .header("content-type", "application/json")
+                            .header(
+                                "authorization",
+                                format!(
+                                    "Bearer {}",
+                                    auth_token_with(
+                                        Role::EmergencyContact,
+                                        vec![SensitivityTier::Amber],
+                                        AccessLevel::LimitedWrite,
+                                    )
+                                ),
+                            )
+                            .body(Body::from(body))
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+
+                assert_eq!(response.status(), StatusCode::FORBIDDEN);
             },
         )
         .await;

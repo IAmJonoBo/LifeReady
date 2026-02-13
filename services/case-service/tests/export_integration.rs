@@ -1,8 +1,8 @@
 use audit_verifier::verify_bundle;
 use axum::{
+    Router,
     body::Body,
     http::{Request, StatusCode},
-    Router,
 };
 use http_body_util::BodyExt;
 use lifeready_auth::{AccessLevel, AuthConfig, Claims, Role, SensitivityTier};
