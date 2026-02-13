@@ -14,7 +14,7 @@ services:
       timeout: 3s
       retries: 20
     volumes:
-      - lifeready_pg:/var/lib/postgresql/data
+      - lifeready_pg:/var/lib/postgresql
 
 volumes:
   lifeready_pg:

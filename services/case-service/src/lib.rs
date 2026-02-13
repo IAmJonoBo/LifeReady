@@ -500,6 +500,21 @@ async fn export_case(
     let audit_sha256 = sha256_file(&audit_path)
         .map_err(|error| invalid_request(Some(request_id), error.to_string()))?;
 
+    // Generate MHCA39 template output (structured JSON + markdown instructions)
+    let mhca39_template = generate_mhca39_template(pool, case_id, &manifest_documents, request_id).await?;
+    let template_path = export_dir.join("MHCA39_draft.json");
+    let template_bytes = serde_json::to_vec_pretty(&mhca39_template)
+        .map_err(|error| invalid_request(Some(request_id), error.to_string()))?;
+    fs::write(&template_path, &template_bytes)
+        .map_err(|error| invalid_request(Some(request_id), error.to_string()))?;
+    let template_sha256 = sha256_bytes(&template_bytes);
+
+    let instructions_path = export_dir.join("MHCA39_instructions.md");
+    let instructions = generate_mhca39_instructions(&mhca39_template);
+    fs::write(&instructions_path, &instructions)
+        .map_err(|error| invalid_request(Some(request_id), error.to_string()))?;
+    let instructions_sha256 = sha256_bytes(instructions.as_bytes());
+
     let manifest = ExportManifest {
         case_id: case_id.to_string(),
         case_type: "mhca39".into(),
@@ -520,6 +535,8 @@ async fn export_case(
     let mut checksums = Vec::new();
     checksums.push(format!("{}  manifest.json", manifest_sha256));
     checksums.push(format!("{}  audit.jsonl", audit_sha256));
+    checksums.push(format!("{}  MHCA39_draft.json", template_sha256));
+    checksums.push(format!("{}  MHCA39_instructions.md", instructions_sha256));
     for doc in &manifest_documents {
         checksums.push(format!("{}  {}", doc.sha256, doc.bundle_path));
     }
@@ -551,6 +568,172 @@ async fn export_case(
     };
 
     Ok(Json(response))
+}
+
+/// MHCA39 template output structure
+#[derive(Debug, Serialize, Deserialize)]
+struct Mhca39Template {
+    /// Case identifier
+    case_id: String,
+    /// Export timestamp
+    exported_at: String,
+    /// Subject person ID
+    subject_person_id: String,
+    /// Applicant person ID
+    applicant_person_id: String,
+    /// Relationship to subject
+    relationship_to_subject: Option<String>,
+    /// Notes
+    notes: Option<String>,
+    /// Evidence checklist with slot status
+    evidence_checklist: Vec<EvidenceChecklistItem>,
+    /// Disclaimer
+    disclaimer: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct EvidenceChecklistItem {
+    slot_name: String,
+    required: bool,
+    attached: bool,
+    document_id: Option<String>,
+    document_type: Option<String>,
+    title: Option<String>,
+}
+
+async fn generate_mhca39_template(
+    pool: &PgPool,
+    case_id: uuid::Uuid,
+    manifest_documents: &[ManifestDocument],
+    request_id: RequestId,
+) -> Result<Mhca39Template, axum::response::Response> {
+    let case_row = sqlx::query(
+        "SELECT m.subject_person_id, m.applicant_person_id, m.relationship_to_subject, m.notes, m.required_evidence_slots \
+         FROM mhca39_cases m WHERE m.case_id = $1",
+    )
+    .bind(case_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|error| db_error_to_response(error, request_id))?;
+
+    let case_row = match case_row {
+        Some(row) => row,
+        None => return Err(not_found(Some(request_id), "mhca39 case not found")),
+    };
+
+    let subject_person_id: uuid::Uuid = case_row
+        .try_get("subject_person_id")
+        .map_err(|error| db_error_to_response(error, request_id))?;
+    let applicant_person_id: uuid::Uuid = case_row
+        .try_get("applicant_person_id")
+        .map_err(|error| db_error_to_response(error, request_id))?;
+    let relationship_to_subject: Option<String> = case_row
+        .try_get("relationship_to_subject")
+        .map_err(|error| db_error_to_response(error, request_id))?;
+    let notes: Option<String> = case_row
+        .try_get("notes")
+        .map_err(|error| db_error_to_response(error, request_id))?;
+    let required_slots: Vec<String> = case_row
+        .try_get("required_evidence_slots")
+        .map_err(|error| db_error_to_response(error, request_id))?;
+
+    let evidence_rows = sqlx::query(
+        "SELECT e.slot_name, e.document_id, d.document_type, d.title \
+         FROM mhca39_evidence e \
+         LEFT JOIN documents d ON d.document_id = e.document_id \
+         WHERE e.case_id = $1 \
+         ORDER BY e.slot_name",
+    )
+    .bind(case_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|error| db_error_to_response(error, request_id))?;
+
+    let mut checklist = Vec::new();
+    for row in evidence_rows {
+        let slot_name: String = row
+            .try_get("slot_name")
+            .map_err(|error| db_error_to_response(error, request_id))?;
+        let document_id: Option<uuid::Uuid> = row
+            .try_get("document_id")
+            .map_err(|error| db_error_to_response(error, request_id))?;
+        let document_type: Option<String> = row
+            .try_get("document_type")
+            .map_err(|error| db_error_to_response(error, request_id))?;
+        let title: Option<String> = row
+            .try_get("title")
+            .map_err(|error| db_error_to_response(error, request_id))?;
+
+        checklist.push(EvidenceChecklistItem {
+            slot_name: slot_name.clone(),
+            required: required_slots.contains(&slot_name),
+            attached: document_id.is_some(),
+            document_id: document_id.map(|id| id.to_string()),
+            document_type,
+            title,
+        });
+    }
+
+    let _ = manifest_documents;
+
+    Ok(Mhca39Template {
+        case_id: case_id.to_string(),
+        exported_at: Utc::now().to_rfc3339(),
+        subject_person_id: subject_person_id.to_string(),
+        applicant_person_id: applicant_person_id.to_string(),
+        relationship_to_subject,
+        notes,
+        evidence_checklist: checklist,
+        disclaimer: "DISCLAIMER: This document pack is generated by LifeReady SA for \
+            evidentiary purposes only. It does NOT constitute a legal determination of \
+            incapacity. The applicant must follow the official MHCA 39 process with the \
+            Master of the High Court. LifeReady SA does not provide legal or medical advice."
+            .to_string(),
+    })
+}
+
+fn generate_mhca39_instructions(template: &Mhca39Template) -> String {
+    let mut md = String::new();
+    md.push_str("# MHCA 39 Submission Pack Instructions\n\n");
+    md.push_str("## Overview\n\n");
+    md.push_str("This export pack contains evidence documents for an MHCA 39 application ");
+    md.push_str("to the Master of the High Court for administration appointment.\n\n");
+    md.push_str(&format!("**Case ID:** `{}`\n\n", template.case_id));
+    md.push_str(&format!("**Exported:** {}\n\n", template.exported_at));
+
+    md.push_str("## Disclaimer\n\n");
+    md.push_str("> ");
+    md.push_str(&template.disclaimer);
+    md.push_str("\n\n");
+
+    md.push_str("## Evidence Checklist\n\n");
+    md.push_str("| Slot | Required | Attached | Document |\n");
+    md.push_str("|------|----------|----------|----------|\n");
+    for item in &template.evidence_checklist {
+        let required = if item.required { "✓" } else { "-" };
+        let attached = if item.attached { "✓" } else { "✗" };
+        let doc = item.title.as_deref().unwrap_or("-");
+        md.push_str(&format!(
+            "| {} | {} | {} | {} |\n",
+            item.slot_name, required, attached, doc
+        ));
+    }
+    md.push_str("\n");
+
+    md.push_str("## Next Steps\n\n");
+    md.push_str("1. Review all documents in the `documents/` folder\n");
+    md.push_str("2. Complete the official MHCA 39 form from the Master of the High Court\n");
+    md.push_str("3. Have the applicant swear/affirm the application before a Commissioner of Oaths\n");
+    md.push_str("4. Submit the application with this evidence pack to the Master's Office\n");
+    md.push_str("5. Retain this pack and the `checksums.txt` for verification purposes\n\n");
+
+    md.push_str("## Verification\n\n");
+    md.push_str("Use the `audit-verifier` CLI tool to verify the integrity of this bundle:\n\n");
+    md.push_str("```bash\n");
+    md.push_str("audit-verifier verify-bundle --bundle <path-to-export>\n");
+    md.push_str("```\n");
+
+    md
 }
 
 pub fn addr_from_env(default_port: u16) -> SocketAddr {

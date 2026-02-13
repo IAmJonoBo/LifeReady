@@ -207,3 +207,48 @@ async fn get_document_rejects_invalid_principal_id() {
     let res = axum::Router::into_service(app).oneshot(req).await.unwrap();
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
 }
+
+#[tokio::test]
+async fn download_document_rejects_invalid_document_id() {
+    init_env();
+    let app = vault_service::router();
+    let req = Request::builder()
+        .uri("/v1/documents/not-a-uuid/download")
+        .header("authorization", format!("Bearer {}", read_token()))
+        .body(Body::empty())
+        .unwrap();
+
+    let res = axum::Router::into_service(app).oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn download_document_rejects_invalid_principal_id() {
+    init_env();
+    let app = vault_service::router();
+    let req = Request::builder()
+        .uri("/v1/documents/00000000-0000-0000-0000-000000000010/download")
+        .header(
+            "authorization",
+            format!("Bearer {}", invalid_principal_read_token()),
+        )
+        .body(Body::empty())
+        .unwrap();
+
+    let res = axum::Router::into_service(app).oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn download_document_returns_bad_request_without_pool() {
+    init_env();
+    let app = vault_service::router();
+    let req = Request::builder()
+        .uri("/v1/documents/00000000-0000-0000-0000-000000000010/download")
+        .header("authorization", format!("Bearer {}", read_token()))
+        .body(Body::empty())
+        .unwrap();
+
+    let res = axum::Router::into_service(app).oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+}
