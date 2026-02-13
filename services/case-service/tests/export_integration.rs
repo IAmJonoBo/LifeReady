@@ -226,12 +226,13 @@ fn sha256_file(path: &std::path::Path) -> String {
 
 fn default_slots() -> Vec<&'static str> {
     vec![
-        "id_subject",
-        "id_applicant",
-        "address_subject",
-        "asset_summary",
-        "medical_evidence_1",
-        "medical_evidence_2",
+        "medical_certificate_1",
+        "medical_certificate_2",
+        "assets_income_schedule",
+        "applicant_id_copy",
+        "patient_id_copy",
+        "supporting_affidavit",
+        "mhca39_form_data",
     ]
 }
 

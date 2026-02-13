@@ -826,8 +826,8 @@ async fn create_mhca39_uses_default_slots() {
         .await
         .unwrap();
     let slots: Vec<String> = row.try_get("required_evidence_slots").unwrap();
-    assert!(slots.len() >= 6);
-    assert!(slots.contains(&"id_subject".to_string()));
+    assert!(slots.len() >= 7);
+    assert!(slots.contains(&"medical_certificate_1".to_string()));
 }
 
 #[tokio::test]
