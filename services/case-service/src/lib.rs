@@ -667,6 +667,8 @@ async fn export_case(
         }
     };
 
+    // Safety: evidence_table and slots_query are compile-time string literals
+    // selected by the exhaustive match above; they are never user-supplied.
     let missing_query = format!(
         "SELECT slot_name FROM {} WHERE case_id = $1 AND document_id IS NULL",
         evidence_table
