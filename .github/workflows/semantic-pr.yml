@@ -1,7 +1,8 @@
+---
 name: semantic-pr
 
-on:
-  pull_request_target:
+"on":
+  pull_request_target: {}
 
 permissions:
   contents: read

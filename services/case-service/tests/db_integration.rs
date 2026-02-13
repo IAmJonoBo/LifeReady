@@ -73,6 +73,19 @@ fn token_read_packs() -> String {
     config.issue_token(&claims).expect("token")
 }
 
+fn token_invalid_principal() -> String {
+    let config = AuthConfig::new("test-secret-32-chars-minimum!!");
+    let claims = Claims::new(
+        "not-a-uuid",
+        Role::Principal,
+        vec![SensitivityTier::Amber],
+        AccessLevel::LimitedWrite,
+        None,
+        300,
+    );
+    config.issue_token(&claims).expect("token")
+}
+
 async fn setup_db() -> Option<PgPool> {
     let database_url = match std::env::var("DATABASE_URL") {
         Ok(value) => value,
@@ -1326,6 +1339,71 @@ async fn create_mhca39_rejects_invalid_applicant_person_id() {
 }
 
 #[tokio::test]
+async fn create_emergency_pack_rejects_invalid_principal_id() {
+    init_env();
+    let pool = match setup_db().await {
+        Some(pool) => pool,
+        None => return,
+    };
+    reset_db(&pool).await.unwrap();
+
+    let app = case_service::router();
+    let body =
+        serde_json::json!({"directive_document_ids": [], "emergency_contacts": []}).to_string();
+    let response = axum::Router::into_service(app)
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/cases/emergency-pack")
+                .header("content-type", "application/json")
+                .header(
+                    "authorization",
+                    format!("Bearer {}", token_invalid_principal()),
+                )
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn create_mhca39_rejects_invalid_principal_id() {
+    init_env();
+    let pool = match setup_db().await {
+        Some(pool) => pool,
+        None => return,
+    };
+    reset_db(&pool).await.unwrap();
+
+    let app = case_service::router();
+    let body = serde_json::json!({
+        "subject_person_id": Uuid::new_v4().to_string(),
+        "applicant_person_id": Uuid::new_v4().to_string(),
+    })
+    .to_string();
+    let response = axum::Router::into_service(app)
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/cases/mhca39")
+                .header("content-type", "application/json")
+                .header(
+                    "authorization",
+                    format!("Bearer {}", token_invalid_principal()),
+                )
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
 async fn attach_evidence_rejects_insufficient_role() {
     init_env();
     let pool = match setup_db().await {
@@ -1492,6 +1570,37 @@ async fn attach_evidence_rejects_nonexistent_case() {
 }
 
 #[tokio::test]
+async fn attach_evidence_rejects_invalid_principal_id() {
+    init_env();
+    let pool = match setup_db().await {
+        Some(pool) => pool,
+        None => return,
+    };
+    reset_db(&pool).await.unwrap();
+
+    let app = case_service::router();
+    let case_id = Uuid::new_v4();
+    let attach_body = serde_json::json!({"document_id": Uuid::new_v4().to_string()}).to_string();
+    let response = axum::Router::into_service(app)
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri(format!("/v1/cases/{case_id}/evidence/id_subject"))
+                .header("content-type", "application/json")
+                .header(
+                    "authorization",
+                    format!("Bearer {}", token_invalid_principal()),
+                )
+                .body(Body::from(attach_body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
 async fn export_case_rejects_invalid_case_id() {
     init_env();
     let pool = match setup_db().await {
@@ -1540,4 +1649,33 @@ async fn export_case_rejects_nonexistent_case() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn export_case_rejects_invalid_principal_id() {
+    init_env();
+    let pool = match setup_db().await {
+        Some(pool) => pool,
+        None => return,
+    };
+    reset_db(&pool).await.unwrap();
+
+    let app = case_service::router();
+    let case_id = Uuid::new_v4();
+    let response = axum::Router::into_service(app)
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/v1/cases/{case_id}/export"))
+                .header(
+                    "authorization",
+                    format!("Bearer {}", token_invalid_principal()),
+                )
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 }

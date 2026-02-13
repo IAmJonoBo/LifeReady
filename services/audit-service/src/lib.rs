@@ -69,6 +69,7 @@ pub fn app() -> Router {
     );
     Router::new()
         .route("/healthz", get(healthz))
+        .route("/readyz", get(readyz))
         .route("/v1/audit/events", post(append_audit_event))
         .route("/v1/audit/export", get(export_audit))
         .with_state(state)
@@ -78,6 +79,25 @@ pub fn app() -> Router {
 
 async fn healthz() -> &'static str {
     "ok"
+}
+
+async fn readyz(State(state): State<AppState>) -> (StatusCode, Json<serde_json::Value>) {
+    let db_ready = match &state.pool {
+        Some(pool) => sqlx::query("SELECT 1").execute(pool).await.is_ok(),
+        None => false,
+    };
+
+    if db_ready {
+        (
+            StatusCode::OK,
+            Json(serde_json::json!({"status": "ready", "database": "up"})),
+        )
+    } else {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({"status": "not_ready", "database": "down"})),
+        )
+    }
 }
 
 pub fn addr_from_env(default_port: u16) -> SocketAddr {
@@ -112,8 +132,8 @@ pub async fn check_db() -> Option<sqlx::PgPool> {
     };
 
     if let Err(error) = sqlx::query("SELECT 1").execute(&pool).await {
-        tracing::warn!(error = %error, "database ping failed; continuing");
-        return Some(pool);
+        tracing::warn!(error = %error, "database ping failed; readiness unavailable");
+        return None;
     }
 
     tracing::info!("database connected");
@@ -376,8 +396,15 @@ fn db_error_to_response(error: sqlx::Error, request_id: RequestId) -> axum::resp
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::http::StatusCode;
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode},
+    };
+    use lifeready_auth::{AccessLevel, AuthConfig, Claims, Role};
+    use std::future::Future;
+    use std::net::SocketAddr;
     use std::sync::Mutex;
+    use tower::util::ServiceExt;
 
     static ENV_LOCK: Mutex<()> = Mutex::new(());
 
@@ -403,6 +430,32 @@ mod tests {
         }
     }
 
+    async fn with_env_async<F, Fut>(vars: &[(&str, Option<&str>)], f: F)
+    where
+        F: FnOnce() -> Fut,
+        Fut: Future<Output = ()>,
+    {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let mut saved = Vec::with_capacity(vars.len());
+
+        for (key, value) in vars {
+            saved.push((*key, std::env::var(*key).ok()));
+            match value {
+                Some(value) => unsafe { std::env::set_var(*key, value) },
+                None => unsafe { std::env::remove_var(*key) },
+            }
+        }
+
+        f().await;
+
+        for (key, value) in saved {
+            match value {
+                Some(value) => unsafe { std::env::set_var(key, value) },
+                None => unsafe { std::env::remove_var(key) },
+            }
+        }
+    }
+
     #[test]
     fn export_dir_defaults_when_unset() {
         with_env(&[("AUDIT_EXPORT_DIR", None)], || {
@@ -411,6 +464,466 @@ mod tests {
                 PathBuf::from("exports").join("audit")
             );
         });
+    }
+
+    #[test]
+    fn export_dir_honors_override() {
+        with_env(
+            &[("AUDIT_EXPORT_DIR", Some("custom-audit-exports"))],
+            || {
+                assert_eq!(export_dir_from_env(), PathBuf::from("custom-audit-exports"));
+            },
+        );
+    }
+
+    #[test]
+    fn addr_from_env_prefers_audit_port_then_port_then_default() {
+        with_env(
+            &[
+                ("HOST", Some("127.0.0.1")),
+                ("AUDIT_PORT", Some("6050")),
+                ("PORT", Some("7050")),
+            ],
+            || {
+                let addr = addr_from_env(8085);
+                assert_eq!(addr, "127.0.0.1:6050".parse::<SocketAddr>().unwrap());
+            },
+        );
+
+        with_env(
+            &[
+                ("HOST", Some("0.0.0.0")),
+                ("AUDIT_PORT", None),
+                ("PORT", Some("7050")),
+            ],
+            || {
+                let addr = addr_from_env(8085);
+                assert_eq!(addr, "0.0.0.0:7050".parse::<SocketAddr>().unwrap());
+            },
+        );
+
+        with_env(
+            &[
+                ("HOST", Some("0.0.0.0")),
+                ("AUDIT_PORT", None),
+                ("PORT", None),
+            ],
+            || {
+                let addr = addr_from_env(8085);
+                assert_eq!(addr, "0.0.0.0:8085".parse::<SocketAddr>().unwrap());
+            },
+        );
+    }
+
+    #[tokio::test]
+    async fn check_db_returns_none_without_database_url() {
+        with_env_async(&[("DATABASE_URL", None)], || async {
+            assert!(check_db().await.is_none());
+        })
+        .await;
+    }
+
+    fn auth_token(access: AccessLevel) -> String {
+        let config = AuthConfig::new("test-secret-32-chars-minimum!!");
+        let claims = Claims::new(
+            "00000000-0000-0000-0000-000000000001",
+            Role::Principal,
+            vec![SensitivityTier::Amber],
+            access,
+            None,
+            300,
+        );
+        config.issue_token(&claims).expect("token")
+    }
+
+    fn auth_token_with(
+        principal_id: &str,
+        role: Role,
+        tiers: Vec<SensitivityTier>,
+        access: AccessLevel,
+    ) -> String {
+        let config = AuthConfig::new("test-secret-32-chars-minimum!!");
+        let claims = Claims::new(principal_id, role, tiers, access, None, 300);
+        config.issue_token(&claims).expect("token")
+    }
+
+    #[tokio::test]
+    async fn append_event_rejects_invalid_tier() {
+        with_env_async(
+            &[
+                ("LIFEREADY_ENV", Some("dev")),
+                ("JWT_SECRET", Some("test-secret-32-chars-minimum!!")),
+                (
+                    "DATABASE_URL",
+                    Some("postgres://postgres:postgres@127.0.0.1:5432/lifeready"),
+                ),
+            ],
+            || async {
+                let app = app();
+                let body = serde_json::json!({
+                    "actor_principal_id": "00000000-0000-0000-0000-000000000001",
+                    "action": "case.export",
+                    "tier": "purple",
+                    "case_id": "00000000-0000-0000-0000-000000000010",
+                    "payload": {"ok": true}
+                })
+                .to_string();
+
+                let response = app
+                    .oneshot(
+                        Request::builder()
+                            .method("POST")
+                            .uri("/v1/audit/events")
+                            .header("content-type", "application/json")
+                            .header(
+                                "authorization",
+                                format!("Bearer {}", auth_token(AccessLevel::LimitedWrite)),
+                            )
+                            .body(Body::from(body))
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+
+                assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+            },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn append_event_rejects_insufficient_role() {
+        with_env_async(
+            &[
+                ("LIFEREADY_ENV", Some("dev")),
+                ("JWT_SECRET", Some("test-secret-32-chars-minimum!!")),
+                (
+                    "DATABASE_URL",
+                    Some("postgres://postgres:postgres@127.0.0.1:5432/lifeready"),
+                ),
+            ],
+            || async {
+                let app = app();
+                let body = serde_json::json!({
+                    "actor_principal_id": "00000000-0000-0000-0000-000000000001",
+                    "action": "case.export",
+                    "tier": "amber",
+                    "case_id": "00000000-0000-0000-0000-000000000010",
+                    "payload": {"ok": true}
+                })
+                .to_string();
+
+                let response = app
+                    .oneshot(
+                        Request::builder()
+                            .method("POST")
+                            .uri("/v1/audit/events")
+                            .header("content-type", "application/json")
+                            .header(
+                                "authorization",
+                                format!(
+                                    "Bearer {}",
+                                    auth_token_with(
+                                        "00000000-0000-0000-0000-000000000001",
+                                        Role::EmergencyContact,
+                                        vec![SensitivityTier::Amber],
+                                        AccessLevel::LimitedWrite,
+                                    )
+                                ),
+                            )
+                            .body(Body::from(body))
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+
+                assert_eq!(response.status(), StatusCode::FORBIDDEN);
+            },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn append_event_rejects_insufficient_tier() {
+        with_env_async(
+            &[
+                ("LIFEREADY_ENV", Some("dev")),
+                ("JWT_SECRET", Some("test-secret-32-chars-minimum!!")),
+                (
+                    "DATABASE_URL",
+                    Some("postgres://postgres:postgres@127.0.0.1:5432/lifeready"),
+                ),
+            ],
+            || async {
+                let app = app();
+                let body = serde_json::json!({
+                    "actor_principal_id": "00000000-0000-0000-0000-000000000001",
+                    "action": "case.export",
+                    "tier": "red",
+                    "case_id": "00000000-0000-0000-0000-000000000010",
+                    "payload": {"ok": true}
+                })
+                .to_string();
+
+                let response = app
+                    .oneshot(
+                        Request::builder()
+                            .method("POST")
+                            .uri("/v1/audit/events")
+                            .header("content-type", "application/json")
+                            .header(
+                                "authorization",
+                                format!("Bearer {}", auth_token(AccessLevel::LimitedWrite)),
+                            )
+                            .body(Body::from(body))
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+
+                assert_eq!(response.status(), StatusCode::FORBIDDEN);
+            },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn append_event_rejects_missing_scope() {
+        with_env_async(
+            &[
+                ("LIFEREADY_ENV", Some("dev")),
+                ("JWT_SECRET", Some("test-secret-32-chars-minimum!!")),
+                (
+                    "DATABASE_URL",
+                    Some("postgres://postgres:postgres@127.0.0.1:5432/lifeready"),
+                ),
+            ],
+            || async {
+                let app = app();
+                let body = serde_json::json!({
+                    "actor_principal_id": "00000000-0000-0000-0000-000000000001",
+                    "action": "case.export",
+                    "tier": "amber",
+                    "case_id": "00000000-0000-0000-0000-000000000010",
+                    "payload": {"ok": true}
+                })
+                .to_string();
+
+                let response = app
+                    .oneshot(
+                        Request::builder()
+                            .method("POST")
+                            .uri("/v1/audit/events")
+                            .header("content-type", "application/json")
+                            .header(
+                                "authorization",
+                                format!("Bearer {}", auth_token(AccessLevel::ReadOnlyAll)),
+                            )
+                            .body(Body::from(body))
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+
+                assert_eq!(response.status(), StatusCode::FORBIDDEN);
+            },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn append_event_rejects_invalid_actor_principal_id() {
+        with_env_async(
+            &[
+                ("LIFEREADY_ENV", Some("dev")),
+                ("JWT_SECRET", Some("test-secret-32-chars-minimum!!")),
+                (
+                    "DATABASE_URL",
+                    Some("postgres://postgres:postgres@127.0.0.1:5432/lifeready"),
+                ),
+            ],
+            || async {
+                let app = app();
+                let body = serde_json::json!({
+                    "actor_principal_id": "not-a-uuid",
+                    "action": "case.export",
+                    "tier": "amber",
+                    "case_id": "00000000-0000-0000-0000-000000000010",
+                    "payload": {"ok": true}
+                })
+                .to_string();
+
+                let response = app
+                    .oneshot(
+                        Request::builder()
+                            .method("POST")
+                            .uri("/v1/audit/events")
+                            .header("content-type", "application/json")
+                            .header(
+                                "authorization",
+                                format!("Bearer {}", auth_token(AccessLevel::LimitedWrite)),
+                            )
+                            .body(Body::from(body))
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+
+                assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+            },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn append_event_rejects_invalid_case_id() {
+        with_env_async(
+            &[
+                ("LIFEREADY_ENV", Some("dev")),
+                ("JWT_SECRET", Some("test-secret-32-chars-minimum!!")),
+                (
+                    "DATABASE_URL",
+                    Some("postgres://postgres:postgres@127.0.0.1:5432/lifeready"),
+                ),
+            ],
+            || async {
+                let app = app();
+                let body = serde_json::json!({
+                    "actor_principal_id": "00000000-0000-0000-0000-000000000001",
+                    "action": "case.export",
+                    "tier": "amber",
+                    "case_id": "not-a-uuid",
+                    "payload": {"ok": true}
+                })
+                .to_string();
+
+                let response = app
+                    .oneshot(
+                        Request::builder()
+                            .method("POST")
+                            .uri("/v1/audit/events")
+                            .header("content-type", "application/json")
+                            .header(
+                                "authorization",
+                                format!("Bearer {}", auth_token(AccessLevel::LimitedWrite)),
+                            )
+                            .body(Body::from(body))
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+
+                assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+            },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn export_returns_bad_request_without_database_pool() {
+        with_env_async(
+            &[
+                ("LIFEREADY_ENV", Some("dev")),
+                ("JWT_SECRET", Some("test-secret-32-chars-minimum!!")),
+                ("DATABASE_URL", None),
+            ],
+            || async {
+                let app = app();
+                let response = app
+                    .oneshot(
+                        Request::builder()
+                            .method("GET")
+                            .uri("/v1/audit/export")
+                            .header(
+                                "authorization",
+                                format!("Bearer {}", auth_token(AccessLevel::ReadOnlyAll)),
+                            )
+                            .body(Body::empty())
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+
+                assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+            },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn export_rejects_insufficient_role() {
+        with_env_async(
+            &[
+                ("LIFEREADY_ENV", Some("dev")),
+                ("JWT_SECRET", Some("test-secret-32-chars-minimum!!")),
+                (
+                    "DATABASE_URL",
+                    Some("postgres://postgres:postgres@127.0.0.1:5432/lifeready"),
+                ),
+            ],
+            || async {
+                let app = app();
+                let response = app
+                    .oneshot(
+                        Request::builder()
+                            .method("GET")
+                            .uri("/v1/audit/export")
+                            .header(
+                                "authorization",
+                                format!(
+                                    "Bearer {}",
+                                    auth_token_with(
+                                        "00000000-0000-0000-0000-000000000001",
+                                        Role::EmergencyContact,
+                                        vec![SensitivityTier::Amber],
+                                        AccessLevel::ReadOnlyAll,
+                                    )
+                                ),
+                            )
+                            .body(Body::empty())
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+
+                assert_eq!(response.status(), StatusCode::FORBIDDEN);
+            },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn export_rejects_missing_scope() {
+        with_env_async(
+            &[
+                ("LIFEREADY_ENV", Some("dev")),
+                ("JWT_SECRET", Some("test-secret-32-chars-minimum!!")),
+                (
+                    "DATABASE_URL",
+                    Some("postgres://postgres:postgres@127.0.0.1:5432/lifeready"),
+                ),
+            ],
+            || async {
+                let app = app();
+                let response = app
+                    .oneshot(
+                        Request::builder()
+                            .method("GET")
+                            .uri("/v1/audit/export")
+                            .header(
+                                "authorization",
+                                format!("Bearer {}", auth_token(AccessLevel::ReadOnlyPacks)),
+                            )
+                            .body(Body::empty())
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+
+                assert_eq!(response.status(), StatusCode::FORBIDDEN);
+            },
+        )
+        .await;
     }
 
     #[test]

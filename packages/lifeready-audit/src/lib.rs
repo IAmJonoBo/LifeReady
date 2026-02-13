@@ -38,6 +38,98 @@ impl AuditEvent {
     }
 }
 
+/// Result type for audit operations
+pub type AuditResult<T> = Result<T, AuditError>;
+
+/// Error type for audit operations
+#[derive(Debug, Clone)]
+pub struct AuditError {
+    pub message: String,
+}
+
+impl std::fmt::Display for AuditError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "AuditError: {}", self.message)
+    }
+}
+
+impl std::error::Error for AuditError {}
+
+impl AuditError {
+    pub fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+        }
+    }
+}
+
+/// Trait for audit event recording
+///
+/// This trait defines the interface for emitting audit events.
+/// Services can use this to record auth decisions, access denied events,
+/// and other auditable actions without direct network coupling.
+pub trait AuditClient: Send + Sync {
+    /// Record an audit event
+    fn record(&self, event: AuditEvent) -> AuditResult<()>;
+
+    /// Record an auth decision (access granted/denied)
+    fn record_auth_decision(
+        &self,
+        actor_principal_id: &str,
+        action: &str,
+        resource: &str,
+        granted: bool,
+        reason: Option<&str>,
+        request_id: Option<Uuid>,
+    ) -> AuditResult<()> {
+        let event = AuditEvent::new(
+            actor_principal_id,
+            if granted {
+                format!("auth.granted:{}", action)
+            } else {
+                format!("auth.denied:{}", action)
+            },
+            "green",
+            request_id,
+            None,
+            serde_json::json!({
+                "resource": resource,
+                "granted": granted,
+                "reason": reason,
+            }),
+        );
+        self.record(event)
+    }
+
+    /// Record an access denied event
+    fn record_access_denied(
+        &self,
+        actor_principal_id: &str,
+        resource: &str,
+        reason: &str,
+        request_id: Option<Uuid>,
+    ) -> AuditResult<()> {
+        self.record_auth_decision(
+            actor_principal_id,
+            "access",
+            resource,
+            false,
+            Some(reason),
+            request_id,
+        )
+    }
+}
+
+/// No-op implementation of AuditClient for use in tests or when audit is disabled
+#[derive(Clone, Default)]
+pub struct NoopAuditClient;
+
+impl AuditClient for NoopAuditClient {
+    fn record(&self, _event: AuditEvent) -> AuditResult<()> {
+        Ok(())
+    }
+}
+
 #[derive(Clone, Default)]
 pub struct InMemoryAuditSink {
     events: Arc<Mutex<Vec<AuditEvent>>>,
@@ -55,5 +147,55 @@ impl InMemoryAuditSink {
             .lock()
             .map(|events| events.clone())
             .unwrap_or_default()
+    }
+}
+
+impl AuditClient for InMemoryAuditSink {
+    fn record(&self, event: AuditEvent) -> AuditResult<()> {
+        InMemoryAuditSink::record(self, event);
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn noop_audit_client_accepts_events() {
+        let client = NoopAuditClient;
+        let event = AuditEvent::new("actor", "action", "green", None, None, serde_json::json!({}));
+        assert!(client.record(event).is_ok());
+    }
+
+    #[test]
+    fn in_memory_sink_implements_audit_client() {
+        let sink = InMemoryAuditSink::default();
+        let client: &dyn AuditClient = &sink;
+        let event = AuditEvent::new("actor", "action", "green", None, None, serde_json::json!({}));
+        assert!(client.record(event).is_ok());
+        assert_eq!(sink.snapshot().len(), 1);
+    }
+
+    #[test]
+    fn record_auth_decision_sets_correct_action() {
+        let sink = InMemoryAuditSink::default();
+        sink.record_auth_decision("actor", "read", "/resource", true, None, None)
+            .unwrap();
+        let events = sink.snapshot();
+        assert_eq!(events.len(), 1);
+        assert!(events[0].action.starts_with("auth.granted:"));
+    }
+
+    #[test]
+    fn record_access_denied_sets_reason() {
+        let sink = InMemoryAuditSink::default();
+        sink.record_access_denied("actor", "/resource", "insufficient_role", None)
+            .unwrap();
+        let events = sink.snapshot();
+        assert_eq!(events.len(), 1);
+        assert!(events[0].action.starts_with("auth.denied:"));
+        let payload = &events[0].payload;
+        assert_eq!(payload["reason"], "insufficient_role");
     }
 }

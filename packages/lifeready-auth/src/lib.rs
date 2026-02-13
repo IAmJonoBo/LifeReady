@@ -538,7 +538,10 @@ where
 
         Box::pin(async move {
             let path = req.uri().path();
-            if path == "/healthz" || allowlist.iter().any(|allowed| allowed == path) {
+            if path == "/healthz"
+                || path == "/readyz"
+                || allowlist.iter().any(|allowed| allowed == path)
+            {
                 return inner.call(req).await;
             }
 
@@ -588,7 +591,10 @@ pub async fn auth_middleware(
     next: Next,
 ) -> Response {
     let path = req.uri().path();
-    if path == "/healthz" || state.allowlist.iter().any(|allowed| allowed == path) {
+    if path == "/healthz"
+        || path == "/readyz"
+        || state.allowlist.iter().any(|allowed| allowed == path)
+    {
         return next.run(req).await;
     }
 
@@ -932,6 +938,72 @@ mod tests {
             .expect("response");
 
         assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn auth_middleware_allows_readyz_without_token() {
+        let config = AuthConfig::new("test-secret");
+        let state = AuthLayerState::new(config, Vec::<String>::new());
+
+        let app = Router::new()
+            .route("/readyz", get(|| async { StatusCode::OK }))
+            .with_state(state.clone())
+            .layer(axum::middleware::from_fn_with_state(state, auth_middleware));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/readyz")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn auth_middleware_allows_allowlisted_path_without_token() {
+        let config = AuthConfig::new("test-secret");
+        let state = AuthLayerState::new(config, vec!["/public".to_string()]);
+
+        let app = Router::new()
+            .route("/public", get(|| async { StatusCode::OK }))
+            .with_state(state.clone())
+            .layer(axum::middleware::from_fn_with_state(state, auth_middleware));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/public")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[test]
+    fn response_helpers_set_expected_statuses() {
+        let request_id = RequestId(Uuid::new_v4());
+
+        let forbidden = access_denied(Some(request_id), "denied");
+        assert_eq!(forbidden.status(), StatusCode::FORBIDDEN);
+
+        let invalid = invalid_request(Some(request_id), "invalid");
+        assert_eq!(invalid.status(), StatusCode::BAD_REQUEST);
+
+        let missing = not_found(Some(request_id), "missing");
+        assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+
+        let conflict_response = conflict(Some(request_id), "conflict");
+        assert_eq!(conflict_response.status(), StatusCode::CONFLICT);
+
+        let ok = ok_response(serde_json::json!({"ok": true}));
+        assert_eq!(ok.status(), StatusCode::OK);
     }
 
     #[test]

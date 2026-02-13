@@ -61,6 +61,25 @@ async fn healthz_exists() {
 }
 
 #[tokio::test]
+async fn readyz_exists() {
+    init_env();
+    let app = audit_service::app();
+    let req = Request::builder()
+        .uri("/readyz")
+        .body(Body::empty())
+        .unwrap();
+
+    let res = app.oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let body = res.into_body().collect().await.unwrap().to_bytes();
+    let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(
+        payload.get("status").and_then(|v| v.as_str()),
+        Some("not_ready")
+    );
+}
+
+#[tokio::test]
 async fn unauthenticated_requests_return_problem_json_with_request_id() {
     init_env();
     let app = audit_service::app();
@@ -290,6 +309,71 @@ async fn append_event_rejects_invalid_case_id() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn append_event_allows_missing_case_id() {
+    init_env();
+    unsafe {
+        std::env::set_var("JWT_SECRET", "test-secret");
+    }
+    let pool = match setup_db().await {
+        Some(pool) => pool,
+        None => return,
+    };
+    sqlx::query("TRUNCATE audit_events")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let app = audit_service::app();
+    let body = serde_json::json!({
+        "actor_principal_id": "00000000-0000-0000-0000-000000000001",
+        "action": "case.export",
+        "tier": "green",
+        "case_id": null,
+        "payload": {"ok": true}
+    })
+    .to_string();
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/audit/events")
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {}", test_token()))
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::CREATED);
+}
+
+#[tokio::test]
+async fn export_returns_database_unavailable_without_pool() {
+    init_env();
+    unsafe {
+        std::env::set_var("JWT_SECRET", "test-secret");
+    }
+    with_env_async(&[("DATABASE_URL", None)], || async {
+        let app = audit_service::app();
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/v1/audit/export")
+                    .header("authorization", format!("Bearer {}", read_only_token()))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    })
+    .await;
 }
 
 #[tokio::test]

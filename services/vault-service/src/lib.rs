@@ -1,6 +1,9 @@
+use async_trait::async_trait;
 use axum::{
+    body::Body,
     extract::{Extension, Path, Query, State},
-    http::StatusCode,
+    http::{header, StatusCode},
+    response::IntoResponse,
     routing::{get, post},
     Json, Router,
 };
@@ -13,21 +16,126 @@ use lifeready_policy::{
     require_role, require_scope, require_tier, Role, SensitivityTier, TierRequirement,
 };
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use sqlx::{PgPool, Row};
+use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::{path::PathBuf, str::FromStr};
 
+// --- Storage trait and implementations ---
+
+/// Storage adapter trait for document blob storage
+#[async_trait]
+pub trait Storage: Send + Sync {
+    /// Store bytes at the given key
+    async fn put(&self, key: &str, data: &[u8]) -> io::Result<()>;
+
+    /// Retrieve bytes for the given key
+    async fn get(&self, key: &str) -> io::Result<Vec<u8>>;
+
+    /// Check if the key exists
+    async fn exists(&self, key: &str) -> io::Result<bool>;
+}
+
+/// Local filesystem storage implementation for development
+pub struct LocalFsStorage {
+    base_dir: PathBuf,
+}
+
+impl LocalFsStorage {
+    pub fn new(base_dir: PathBuf) -> Self {
+        Self { base_dir }
+    }
+
+    fn key_to_path(&self, key: &str) -> PathBuf {
+        if let Some(path) = key.strip_prefix("file://") {
+            PathBuf::from(path)
+        } else if key.starts_with('/') {
+            PathBuf::from(key)
+        } else {
+            self.base_dir.join(key)
+        }
+    }
+}
+
+#[async_trait]
+impl Storage for LocalFsStorage {
+    async fn put(&self, key: &str, data: &[u8]) -> io::Result<()> {
+        let path = self.key_to_path(key);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(path, data)
+    }
+
+    async fn get(&self, key: &str) -> io::Result<Vec<u8>> {
+        let path = self.key_to_path(key);
+        std::fs::read(path)
+    }
+
+    async fn exists(&self, key: &str) -> io::Result<bool> {
+        let path = self.key_to_path(key);
+        Ok(path.exists())
+    }
+}
+
+/// Placeholder Azure Blob Storage implementation (feature-gated)
+#[cfg(feature = "azure")]
+pub struct AzureBlobStorage {
+    _container: String,
+}
+
+#[cfg(feature = "azure")]
+impl AzureBlobStorage {
+    pub fn new(container: String) -> Self {
+        Self {
+            _container: container,
+        }
+    }
+}
+
+#[cfg(feature = "azure")]
+#[async_trait]
+impl Storage for AzureBlobStorage {
+    async fn put(&self, _key: &str, _data: &[u8]) -> io::Result<()> {
+        // Placeholder: Azure integration to be implemented in Phase 4+
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "Azure Blob Storage not yet integrated",
+        ))
+    }
+
+    async fn get(&self, _key: &str) -> io::Result<Vec<u8>> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "Azure Blob Storage not yet integrated",
+        ))
+    }
+
+    async fn exists(&self, _key: &str) -> io::Result<bool> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "Azure Blob Storage not yet integrated",
+        ))
+    }
+}
+
+// --- App State ---
+
 #[derive(Clone)]
 struct AppState {
     pool: Option<PgPool>,
+    storage: Arc<dyn Storage>,
     storage_dir: PathBuf,
 }
 
 pub fn router() -> Router {
+    let storage_dir = storage_dir_from_env();
     let state = AppState {
         pool: pool_from_env(),
-        storage_dir: storage_dir_from_env(),
+        storage: Arc::new(LocalFsStorage::new(storage_dir.clone())),
+        storage_dir,
     };
     let auth_config = Arc::new(
         AuthConfig::from_env_checked()
@@ -36,6 +144,7 @@ pub fn router() -> Router {
 
     Router::new()
         .route("/healthz", get(healthz))
+        .route("/readyz", get(readyz))
         .route("/v1/documents", get(list_documents))
         .route("/v1/documents", post(init_document))
         .route(
@@ -43,6 +152,7 @@ pub fn router() -> Router {
             post(commit_document),
         )
         .route("/v1/documents/{document_id}", get(get_document))
+        .route("/v1/documents/{document_id}/download", get(download_document))
         .with_state(state)
         .layer(AuthLayer::new(auth_config))
         .layer(axum::middleware::from_fn(request_id_middleware))
@@ -50,6 +160,25 @@ pub fn router() -> Router {
 
 async fn healthz() -> &'static str {
     "ok"
+}
+
+async fn readyz(State(state): State<AppState>) -> (StatusCode, Json<serde_json::Value>) {
+    let db_ready = match &state.pool {
+        Some(pool) => sqlx::query("SELECT 1").execute(pool).await.is_ok(),
+        None => false,
+    };
+
+    if db_ready {
+        (
+            StatusCode::OK,
+            Json(serde_json::json!({"status": "ready", "database": "up"})),
+        )
+    } else {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({"status": "not_ready", "database": "down"})),
+        )
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -298,6 +427,155 @@ async fn get_document(
     }))
 }
 
+#[derive(Debug, Deserialize)]
+struct DownloadQuery {
+    version_id: Option<String>,
+}
+
+async fn download_document(
+    State(state): State<AppState>,
+    ctx: RequestContext,
+    Extension(request_id): Extension<RequestId>,
+    Path(document_id): Path<String>,
+    Query(query): Query<DownloadQuery>,
+) -> Result<impl IntoResponse, axum::response::Response> {
+    let pool = match &state.pool {
+        Some(pool) => pool,
+        None => return Err(invalid_request(Some(request_id), "database unavailable")),
+    };
+    require_role(&ctx, &[Role::Principal, Role::Proxy, Role::ExecutorNominee])
+        .map_err(|error| error.into_response(Some(request_id)))?;
+    require_tier(&ctx, TierRequirement::Min(SensitivityTier::Amber))
+        .map_err(|error| error.into_response(Some(request_id)))?;
+    require_scope(&ctx, "read:all").map_err(|error| error.into_response(Some(request_id)))?;
+
+    let document_id = parse_uuid(&document_id)
+        .ok_or_else(|| invalid_request(Some(request_id), "invalid document_id"))?;
+    let principal_id = parse_uuid(&ctx.principal_id)
+        .ok_or_else(|| invalid_request(Some(request_id), "invalid principal_id"))?;
+
+    // Verify document ownership and get sensitivity tier
+    let doc_row = sqlx::query(
+        "SELECT sensitivity, title FROM documents WHERE document_id = $1 AND principal_id = $2",
+    )
+    .bind(document_id)
+    .bind(principal_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|error| db_error_to_response(error, request_id))?;
+
+    let doc_row = match doc_row {
+        Some(row) => row,
+        None => return Err(not_found(Some(request_id), "document not found")),
+    };
+
+    let sensitivity = tier_from_db(
+        doc_row
+            .try_get::<String, _>("sensitivity")
+            .map_err(|error| db_error_to_response(error.into(), request_id))?,
+    )
+    .ok_or_else(|| invalid_request(Some(request_id), "invalid sensitivity"))?;
+
+    ensure_document_access(&ctx, sensitivity, request_id)?;
+
+    let title: String = doc_row
+        .try_get("title")
+        .map_err(|error| db_error_to_response(error.into(), request_id))?;
+
+    // Get version - either specified or latest
+    let version_row = if let Some(version_id_str) = &query.version_id {
+        let version_id = parse_uuid(version_id_str)
+            .ok_or_else(|| invalid_request(Some(request_id), "invalid version_id"))?;
+        sqlx::query(
+            "SELECT blob_ref, sha256, mime_type FROM document_versions \
+             WHERE document_id = $1 AND version_id = $2",
+        )
+        .bind(document_id)
+        .bind(version_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|error| db_error_to_response(error, request_id))?
+    } else {
+        sqlx::query(
+            "SELECT blob_ref, sha256, mime_type FROM document_versions \
+             WHERE document_id = $1 ORDER BY created_at DESC LIMIT 1",
+        )
+        .bind(document_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|error| db_error_to_response(error, request_id))?
+    };
+
+    let version_row = match version_row {
+        Some(row) => row,
+        None => return Err(not_found(Some(request_id), "document version not found")),
+    };
+
+    let blob_ref: String = version_row
+        .try_get("blob_ref")
+        .map_err(|error| db_error_to_response(error.into(), request_id))?;
+    let expected_sha256: String = version_row
+        .try_get("sha256")
+        .map_err(|error| db_error_to_response(error.into(), request_id))?;
+    let mime_type: String = version_row
+        .try_get("mime_type")
+        .map_err(|error| db_error_to_response(error.into(), request_id))?;
+
+    // Read document content via storage adapter
+    let bytes = state
+        .storage
+        .get(&blob_ref)
+        .await
+        .map_err(|error| not_found(Some(request_id), format!("blob not found: {}", error)))?;
+
+    // Re-verify SHA256 on read
+    let actual_sha256 = compute_sha256(&bytes);
+    if actual_sha256 != expected_sha256 {
+        return Err(invalid_request(
+            Some(request_id),
+            "document integrity check failed: sha256 mismatch",
+        ));
+    }
+
+    // Build response with appropriate headers
+    let content_disposition = format!("attachment; filename=\"{}\"", sanitize_filename(&title));
+
+    Ok((
+        StatusCode::OK,
+        [
+            (header::CONTENT_TYPE, mime_type),
+            (header::CONTENT_DISPOSITION, content_disposition),
+            (
+                header::HeaderName::from_static("x-document-sha256"),
+                actual_sha256,
+            ),
+            (
+                header::HeaderName::from_static("x-request-id"),
+                request_id.0.to_string(),
+            ),
+        ],
+        Body::from(bytes),
+    ))
+}
+
+fn compute_sha256(data: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(data);
+    hex::encode(hasher.finalize())
+}
+
+fn sanitize_filename(name: &str) -> String {
+    name.chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' || c == '.' || c == ' ' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
 async fn list_documents(
     State(state): State<AppState>,
     ctx: RequestContext,
@@ -397,8 +675,8 @@ pub async fn check_db() -> Option<sqlx::PgPool> {
     };
 
     if let Err(error) = sqlx::query("SELECT 1").execute(&pool).await {
-        tracing::warn!(error = %error, "database ping failed; continuing");
-        return Some(pool);
+        tracing::warn!(error = %error, "database ping failed; readiness unavailable");
+        return None;
     }
 
     tracing::info!("database connected");
@@ -488,8 +766,66 @@ fn normalize_blob_ref(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::http::StatusCode;
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode},
+    };
+    use lifeready_auth::{AccessLevel, AuthConfig, Claims, Role};
+    use std::future::Future;
+    use std::net::SocketAddr;
+    use std::sync::Mutex;
+    use tower::util::ServiceExt;
     use uuid::Uuid;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    fn with_env(vars: &[(&str, Option<&str>)], f: impl FnOnce()) {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let mut saved = Vec::with_capacity(vars.len());
+
+        for (key, value) in vars {
+            saved.push((*key, std::env::var(*key).ok()));
+            match value {
+                Some(value) => unsafe { std::env::set_var(*key, value) },
+                None => unsafe { std::env::remove_var(*key) },
+            }
+        }
+
+        f();
+
+        for (key, value) in saved {
+            match value {
+                Some(value) => unsafe { std::env::set_var(key, value) },
+                None => unsafe { std::env::remove_var(key) },
+            }
+        }
+    }
+
+    async fn with_env_async<F, Fut>(vars: &[(&str, Option<&str>)], f: F)
+    where
+        F: FnOnce() -> Fut,
+        Fut: Future<Output = ()>,
+    {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let mut saved = Vec::with_capacity(vars.len());
+
+        for (key, value) in vars {
+            saved.push((*key, std::env::var(*key).ok()));
+            match value {
+                Some(value) => unsafe { std::env::set_var(*key, value) },
+                None => unsafe { std::env::remove_var(*key) },
+            }
+        }
+
+        f().await;
+
+        for (key, value) in saved {
+            match value {
+                Some(value) => unsafe { std::env::set_var(key, value) },
+                None => unsafe { std::env::remove_var(key) },
+            }
+        }
+    }
 
     #[test]
     fn tier_string_roundtrip() {
@@ -542,11 +878,591 @@ mod tests {
 
         let missing = normalize_blob_ref("missing", &base, document_id, request_id);
         assert_eq!(missing.unwrap_err().status(), StatusCode::BAD_REQUEST);
+
+        let relative_path = base.join("relative-blob");
+        std::fs::write(&relative_path, "").unwrap();
+        let relative = normalize_blob_ref("relative-blob", &base, document_id, request_id)
+            .expect("relative path resolves");
+        assert!(relative.starts_with("file://"));
+        assert!(relative.contains("relative-blob"));
     }
 
     #[test]
     fn db_error_to_response_returns_bad_request() {
         let response = db_error_to_response(sqlx::Error::RowNotFound, RequestId(Uuid::new_v4()));
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn ensure_document_access_respects_tier_allowlist() {
+        let request_id = RequestId(Uuid::new_v4());
+        let ctx = RequestContext {
+            request_id,
+            principal_id: Uuid::new_v4().to_string(),
+            roles: vec![lifeready_policy::Role::Principal],
+            allowed_tiers: vec![SensitivityTier::Amber],
+            scopes: vec!["read:all".to_string()],
+            expires_at: Utc::now(),
+            email: None,
+        };
+
+        assert!(ensure_document_access(&ctx, SensitivityTier::Amber, request_id).is_ok());
+        assert!(ensure_document_access(&ctx, SensitivityTier::Red, request_id).is_err());
+    }
+
+    #[test]
+    fn storage_dir_defaults_and_overrides() {
+        with_env(&[("LOCAL_STORAGE_DIR", None)], || {
+            assert_eq!(storage_dir_from_env(), PathBuf::from("storage"));
+        });
+
+        with_env(&[("LOCAL_STORAGE_DIR", Some("custom-storage"))], || {
+            assert_eq!(storage_dir_from_env(), PathBuf::from("custom-storage"));
+        });
+    }
+
+    #[test]
+    fn addr_from_env_prefers_vault_port_then_port_then_default() {
+        with_env(
+            &[
+                ("HOST", Some("127.0.0.1")),
+                ("VAULT_PORT", Some("6123")),
+                ("PORT", Some("7123")),
+            ],
+            || {
+                let addr = addr_from_env(8083);
+                assert_eq!(addr, "127.0.0.1:6123".parse::<SocketAddr>().unwrap());
+            },
+        );
+
+        with_env(
+            &[
+                ("HOST", Some("0.0.0.0")),
+                ("VAULT_PORT", None),
+                ("PORT", Some("7123")),
+            ],
+            || {
+                let addr = addr_from_env(8083);
+                assert_eq!(addr, "0.0.0.0:7123".parse::<SocketAddr>().unwrap());
+            },
+        );
+
+        with_env(
+            &[
+                ("HOST", Some("0.0.0.0")),
+                ("VAULT_PORT", None),
+                ("PORT", None),
+            ],
+            || {
+                let addr = addr_from_env(8083);
+                assert_eq!(addr, "0.0.0.0:8083".parse::<SocketAddr>().unwrap());
+            },
+        );
+    }
+
+    #[tokio::test]
+    async fn check_db_returns_none_without_database_url() {
+        with_env_async(&[("DATABASE_URL", None)], || async {
+            assert!(check_db().await.is_none());
+        })
+        .await;
+    }
+
+    fn auth_token(access: AccessLevel) -> String {
+        let config = AuthConfig::new("test-secret-32-chars-minimum!!");
+        let claims = Claims::new(
+            "00000000-0000-0000-0000-000000000001",
+            Role::Principal,
+            vec![SensitivityTier::Amber],
+            access,
+            None,
+            300,
+        );
+        config.issue_token(&claims).expect("token")
+    }
+
+    fn auth_token_with(
+        principal_id: &str,
+        role: Role,
+        tiers: Vec<SensitivityTier>,
+        access: AccessLevel,
+    ) -> String {
+        let config = AuthConfig::new("test-secret-32-chars-minimum!!");
+        let claims = Claims::new(principal_id, role, tiers, access, None, 300);
+        config.issue_token(&claims).expect("token")
+    }
+
+    #[tokio::test]
+    async fn init_document_returns_bad_request_without_database_pool() {
+        with_env_async(
+            &[
+                ("LIFEREADY_ENV", Some("dev")),
+                ("JWT_SECRET", Some("test-secret-32-chars-minimum!!")),
+                ("DATABASE_URL", None),
+            ],
+            || async {
+                let app = router();
+                let body = serde_json::json!({
+                    "document_type": "will",
+                    "title": "My will",
+                    "sensitivity": "amber"
+                })
+                .to_string();
+                let response = axum::Router::into_service(app)
+                    .oneshot(
+                        Request::builder()
+                            .method("POST")
+                            .uri("/v1/documents")
+                            .header("content-type", "application/json")
+                            .header(
+                                "authorization",
+                                format!("Bearer {}", auth_token(AccessLevel::LimitedWrite)),
+                            )
+                            .body(Body::from(body))
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+
+                assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+            },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn init_document_rejects_insufficient_role() {
+        with_env_async(
+            &[
+                ("LIFEREADY_ENV", Some("dev")),
+                ("JWT_SECRET", Some("test-secret-32-chars-minimum!!")),
+                (
+                    "DATABASE_URL",
+                    Some("postgres://postgres:postgres@127.0.0.1:5432/lifeready"),
+                ),
+            ],
+            || async {
+                let app = router();
+                let body = serde_json::json!({
+                    "document_type": "will",
+                    "title": "My will",
+                    "sensitivity": "amber"
+                })
+                .to_string();
+                let response = axum::Router::into_service(app)
+                    .oneshot(
+                        Request::builder()
+                            .method("POST")
+                            .uri("/v1/documents")
+                            .header("content-type", "application/json")
+                            .header(
+                                "authorization",
+                                format!(
+                                    "Bearer {}",
+                                    auth_token_with(
+                                        "00000000-0000-0000-0000-000000000001",
+                                        Role::EmergencyContact,
+                                        vec![SensitivityTier::Amber],
+                                        AccessLevel::LimitedWrite,
+                                    )
+                                ),
+                            )
+                            .body(Body::from(body))
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+
+                assert_eq!(response.status(), StatusCode::FORBIDDEN);
+            },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn init_document_rejects_insufficient_tier() {
+        with_env_async(
+            &[
+                ("LIFEREADY_ENV", Some("dev")),
+                ("JWT_SECRET", Some("test-secret-32-chars-minimum!!")),
+                (
+                    "DATABASE_URL",
+                    Some("postgres://postgres:postgres@127.0.0.1:5432/lifeready"),
+                ),
+            ],
+            || async {
+                let app = router();
+                let body = serde_json::json!({
+                    "document_type": "will",
+                    "title": "My will",
+                    "sensitivity": "red"
+                })
+                .to_string();
+                let response = axum::Router::into_service(app)
+                    .oneshot(
+                        Request::builder()
+                            .method("POST")
+                            .uri("/v1/documents")
+                            .header("content-type", "application/json")
+                            .header(
+                                "authorization",
+                                format!("Bearer {}", auth_token(AccessLevel::LimitedWrite)),
+                            )
+                            .body(Body::from(body))
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+
+                assert_eq!(response.status(), StatusCode::FORBIDDEN);
+            },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn init_document_rejects_missing_scope() {
+        with_env_async(
+            &[
+                ("LIFEREADY_ENV", Some("dev")),
+                ("JWT_SECRET", Some("test-secret-32-chars-minimum!!")),
+                (
+                    "DATABASE_URL",
+                    Some("postgres://postgres:postgres@127.0.0.1:5432/lifeready"),
+                ),
+            ],
+            || async {
+                let app = router();
+                let body = serde_json::json!({
+                    "document_type": "will",
+                    "title": "My will",
+                    "sensitivity": "amber"
+                })
+                .to_string();
+                let response = axum::Router::into_service(app)
+                    .oneshot(
+                        Request::builder()
+                            .method("POST")
+                            .uri("/v1/documents")
+                            .header("content-type", "application/json")
+                            .header(
+                                "authorization",
+                                format!("Bearer {}", auth_token(AccessLevel::ReadOnlyAll)),
+                            )
+                            .body(Body::from(body))
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+
+                assert_eq!(response.status(), StatusCode::FORBIDDEN);
+            },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn commit_document_rejects_invalid_sha256() {
+        with_env_async(
+            &[
+                ("LIFEREADY_ENV", Some("dev")),
+                ("JWT_SECRET", Some("test-secret-32-chars-minimum!!")),
+                (
+                    "DATABASE_URL",
+                    Some("postgres://postgres:postgres@127.0.0.1:5432/lifeready"),
+                ),
+            ],
+            || async {
+                let app = router();
+                let body = serde_json::json!({
+                    "blob_ref": "auto",
+                    "sha256": "not-a-sha",
+                    "byte_size": 1,
+                    "mime_type": "application/pdf"
+                })
+                .to_string();
+                let response = axum::Router::into_service(app)
+                    .oneshot(
+                        Request::builder()
+                            .method("POST")
+                            .uri("/v1/documents/00000000-0000-0000-0000-000000000010/versions")
+                            .header("content-type", "application/json")
+                            .header(
+                                "authorization",
+                                format!("Bearer {}", auth_token(AccessLevel::LimitedWrite)),
+                            )
+                            .body(Body::from(body))
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+
+                assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+            },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn get_document_rejects_invalid_document_id() {
+        with_env_async(
+            &[
+                ("LIFEREADY_ENV", Some("dev")),
+                ("JWT_SECRET", Some("test-secret-32-chars-minimum!!")),
+                (
+                    "DATABASE_URL",
+                    Some("postgres://postgres:postgres@127.0.0.1:5432/lifeready"),
+                ),
+            ],
+            || async {
+                let app = router();
+                let response = axum::Router::into_service(app)
+                    .oneshot(
+                        Request::builder()
+                            .method("GET")
+                            .uri("/v1/documents/not-a-uuid")
+                            .header(
+                                "authorization",
+                                format!("Bearer {}", auth_token(AccessLevel::ReadOnlyAll)),
+                            )
+                            .body(Body::empty())
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+
+                assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+            },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn commit_document_rejects_insufficient_role() {
+        with_env_async(
+            &[
+                ("LIFEREADY_ENV", Some("dev")),
+                ("JWT_SECRET", Some("test-secret-32-chars-minimum!!")),
+                (
+                    "DATABASE_URL",
+                    Some("postgres://postgres:postgres@127.0.0.1:5432/lifeready"),
+                ),
+            ],
+            || async {
+                let app = router();
+                let body = serde_json::json!({
+                    "blob_ref": "auto",
+                    "sha256": format!("{:0<64}", "a"),
+                    "byte_size": 1,
+                    "mime_type": "application/pdf"
+                })
+                .to_string();
+                let response = axum::Router::into_service(app)
+                    .oneshot(
+                        Request::builder()
+                            .method("POST")
+                            .uri("/v1/documents/00000000-0000-0000-0000-000000000010/versions")
+                            .header("content-type", "application/json")
+                            .header(
+                                "authorization",
+                                format!(
+                                    "Bearer {}",
+                                    auth_token_with(
+                                        "00000000-0000-0000-0000-000000000001",
+                                        Role::EmergencyContact,
+                                        vec![SensitivityTier::Amber],
+                                        AccessLevel::LimitedWrite,
+                                    )
+                                ),
+                            )
+                            .body(Body::from(body))
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+
+                assert_eq!(response.status(), StatusCode::FORBIDDEN);
+            },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn get_document_rejects_missing_scope() {
+        with_env_async(
+            &[
+                ("LIFEREADY_ENV", Some("dev")),
+                ("JWT_SECRET", Some("test-secret-32-chars-minimum!!")),
+                (
+                    "DATABASE_URL",
+                    Some("postgres://postgres:postgres@127.0.0.1:5432/lifeready"),
+                ),
+            ],
+            || async {
+                let app = router();
+                let response = axum::Router::into_service(app)
+                    .oneshot(
+                        Request::builder()
+                            .method("GET")
+                            .uri("/v1/documents/00000000-0000-0000-0000-000000000010")
+                            .header(
+                                "authorization",
+                                format!("Bearer {}", auth_token(AccessLevel::ReadOnlyPacks)),
+                            )
+                            .body(Body::empty())
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+
+                assert_eq!(response.status(), StatusCode::FORBIDDEN);
+            },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn get_document_rejects_invalid_principal_id() {
+        with_env_async(
+            &[
+                ("LIFEREADY_ENV", Some("dev")),
+                ("JWT_SECRET", Some("test-secret-32-chars-minimum!!")),
+                (
+                    "DATABASE_URL",
+                    Some("postgres://postgres:postgres@127.0.0.1:5432/lifeready"),
+                ),
+            ],
+            || async {
+                let app = router();
+                let response = axum::Router::into_service(app)
+                    .oneshot(
+                        Request::builder()
+                            .method("GET")
+                            .uri("/v1/documents/00000000-0000-0000-0000-000000000010")
+                            .header(
+                                "authorization",
+                                format!(
+                                    "Bearer {}",
+                                    auth_token_with(
+                                        "not-a-uuid",
+                                        Role::Principal,
+                                        vec![SensitivityTier::Amber],
+                                        AccessLevel::ReadOnlyAll,
+                                    )
+                                ),
+                            )
+                            .body(Body::empty())
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+
+                assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+            },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn list_documents_rejects_invalid_principal_id() {
+        with_env_async(
+            &[
+                ("LIFEREADY_ENV", Some("dev")),
+                ("JWT_SECRET", Some("test-secret-32-chars-minimum!!")),
+                (
+                    "DATABASE_URL",
+                    Some("postgres://postgres:postgres@127.0.0.1:5432/lifeready"),
+                ),
+            ],
+            || async {
+                let app = router();
+                let response = axum::Router::into_service(app)
+                    .oneshot(
+                        Request::builder()
+                            .method("GET")
+                            .uri("/v1/documents")
+                            .header(
+                                "authorization",
+                                format!(
+                                    "Bearer {}",
+                                    auth_token_with(
+                                        "not-a-uuid",
+                                        Role::Principal,
+                                        vec![SensitivityTier::Amber],
+                                        AccessLevel::ReadOnlyAll,
+                                    )
+                                ),
+                            )
+                            .body(Body::empty())
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+
+                assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+            },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn local_fs_storage_put_get_exists() {
+        let dir = std::env::temp_dir().join(format!("vault-storage-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let storage = LocalFsStorage::new(dir.clone());
+
+        let key = "test-doc-1";
+        let data = b"hello world";
+
+        // Initially doesn't exist
+        assert!(!storage.exists(key).await.unwrap());
+
+        // Put data
+        storage.put(key, data).await.unwrap();
+
+        // Now exists
+        assert!(storage.exists(key).await.unwrap());
+
+        // Get returns same data
+        let retrieved = storage.get(key).await.unwrap();
+        assert_eq!(retrieved, data);
+
+        // Cleanup
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn local_fs_storage_handles_file_url() {
+        let dir = std::env::temp_dir().join(format!("vault-storage-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let storage = LocalFsStorage::new(dir.clone());
+
+        let file_path = dir.join("my-file");
+        std::fs::write(&file_path, b"content").unwrap();
+
+        let key = format!("file://{}", file_path.display());
+        let retrieved = storage.get(&key).await.unwrap();
+        assert_eq!(retrieved, b"content");
+
+        // Cleanup
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn compute_sha256_returns_correct_hash() {
+        let hash = compute_sha256(b"hello");
+        // Known SHA256 of "hello"
+        assert_eq!(
+            hash,
+            "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+        );
+    }
+
+    #[test]
+    fn sanitize_filename_removes_special_chars() {
+        assert_eq!(sanitize_filename("hello.pdf"), "hello.pdf");
+        assert_eq!(sanitize_filename("my file.pdf"), "my file.pdf");
+        assert_eq!(sanitize_filename("file/with/path"), "file_with_path");
+        assert_eq!(sanitize_filename("file<>:\"\\"), "file_____");
     }
 }

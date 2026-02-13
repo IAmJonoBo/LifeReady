@@ -14,6 +14,17 @@ tags:
 security:
   - bearerAuth: []
 paths:
+  /readyz:
+    get:
+      tags: [people]
+      security:
+        - {}
+      summary: Readiness check (dependencies available)
+      responses:
+        "200":
+          $ref: "./common.openapi.yaml#/components/responses/Ready"
+        "503":
+          $ref: "./common.openapi.yaml#/components/responses/NotReady"
   /v1/people:
     post:
       tags: [people]
@@ -306,6 +317,7 @@ components:
               type: array
               items:
                 $ref: "#/components/schemas/SensitivityTier"
+              maxItems: 3
             expires_at:
               $ref: "#/components/schemas/IsoDateTime"
     RoleGrant:

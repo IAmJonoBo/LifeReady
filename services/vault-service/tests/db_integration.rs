@@ -656,6 +656,103 @@ async fn init_document_rejects_invalid_principal() {
 }
 
 #[tokio::test]
+async fn commit_document_rejects_invalid_principal() {
+    init_env();
+    let pool = match setup_db().await {
+        Some(pool) => pool,
+        None => return,
+    };
+    reset_db(&pool).await.unwrap();
+
+    let app = vault_service::router();
+    let document_id = Uuid::new_v4();
+    let body = serde_json::json!({
+        "blob_ref": "auto",
+        "sha256": "a".repeat(64),
+        "byte_size": 10,
+        "mime_type": "text/plain"
+    })
+    .to_string();
+
+    let response = axum::Router::into_service(app)
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/v1/documents/{document_id}/versions"))
+                .header("content-type", "application/json")
+                .header(
+                    "authorization",
+                    format!("Bearer {}", token_invalid_principal()),
+                )
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn get_document_rejects_invalid_principal() {
+    init_env();
+    let pool = match setup_db().await {
+        Some(pool) => pool,
+        None => return,
+    };
+    reset_db(&pool).await.unwrap();
+
+    let app = vault_service::router();
+    let document_id = Uuid::new_v4();
+
+    let response = axum::Router::into_service(app)
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/v1/documents/{document_id}"))
+                .header(
+                    "authorization",
+                    format!("Bearer {}", token_invalid_principal()),
+                )
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn list_documents_rejects_invalid_principal() {
+    init_env();
+    let pool = match setup_db().await {
+        Some(pool) => pool,
+        None => return,
+    };
+    reset_db(&pool).await.unwrap();
+
+    let app = vault_service::router();
+
+    let response = axum::Router::into_service(app)
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/v1/documents")
+                .header(
+                    "authorization",
+                    format!("Bearer {}", token_invalid_principal()),
+                )
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
 async fn get_document_rejects_unlisted_tier() {
     init_env();
     let pool = match setup_db().await {

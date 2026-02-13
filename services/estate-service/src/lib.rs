@@ -30,6 +30,7 @@ pub fn router() -> Router {
 
     Router::new()
         .route("/healthz", get(healthz))
+        .route("/readyz", get(readyz))
         .route("/v1/people", post(create_person).get(list_people))
         .route("/v1/assets", post(create_asset))
         .route("/v1/instructions", post(create_instruction))
@@ -41,6 +42,21 @@ pub fn router() -> Router {
 
 async fn healthz() -> &'static str {
     "ok"
+}
+
+async fn readyz() -> (StatusCode, Json<serde_json::Value>) {
+    let db_ready = check_db().await.is_some();
+    if db_ready {
+        (
+            StatusCode::OK,
+            Json(serde_json::json!({"status": "ready", "database": "up"})),
+        )
+    } else {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({"status": "not_ready", "database": "down"})),
+        )
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -309,8 +325,8 @@ pub async fn check_db() -> Option<sqlx::PgPool> {
     };
 
     if let Err(error) = sqlx::query("SELECT 1").execute(&pool).await {
-        tracing::warn!(error = %error, "database ping failed; continuing");
-        return Some(pool);
+        tracing::warn!(error = %error, "database ping failed; readiness unavailable");
+        return None;
     }
 
     tracing::info!("database connected");

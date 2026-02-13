@@ -1,0 +1,119 @@
+---
+name: release-gates
+
+"on":
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  release-evidence:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Check required release artifacts
+        run: bash scripts/ci/check_release_artifacts.sh
+      - name: Check readiness endpoint coverage
+        run: bash scripts/ci/check_readyz_coverage.sh
+
+  contracts-and-drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: tools/openapi/package-lock.json
+      - name: Install OpenAPI generator wrapper
+        run: npm install --prefix tools/openapi
+      - name: Validate OpenAPI specs
+        run: make validate-openapi
+      - name: Generate Rust Axum stubs
+        run: make generate-axum
+      - name: Fail on generated drift
+        run: git diff --exit-code
+
+  rust-quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Cargo fmt
+        run: cargo fmt --check
+      - name: Cargo clippy
+        run: cargo clippy --workspace --all-targets --all-features
+      - name: Cargo test
+        run: cargo test --workspace --all-targets --all-features
+
+  flutter-quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Detect Flutter app
+        id: flutter
+        run: |
+          if [[ -f apps/lifeready_flutter/pubspec.yaml ]]; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: subosito/flutter-action@v2
+        if: steps.flutter.outputs.found == 'true'
+        with:
+          flutter-version: stable
+          cache: true
+      - name: Generate Flutter tokens
+        if: steps.flutter.outputs.found == 'true'
+        run: make generate-flutter-tokens
+      - name: Flutter analyze and tests
+        if: steps.flutter.outputs.found == 'true'
+        working-directory: apps/lifeready_flutter
+        run: |
+          flutter pub get
+          flutter analyze
+          flutter test
+      - name: Fail on Flutter drift
+        if: steps.flutter.outputs.found == 'true'
+        run: git diff --exit-code
+      - name: Flutter build web
+        if: steps.flutter.outputs.found == 'true'
+        working-directory: apps/lifeready_flutter
+        run: flutter build web --release
+
+  security-gates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit,cargo-deny
+      - name: Cargo audit
+        run: cargo audit
+      - name: Cargo deny
+        run: cargo deny check advisories bans licenses sources
+      - name: Secrets scan
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  coverage-gates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+      - name: Enforce coverage thresholds
+        env:
+          LIFEREADY_COVERAGE_MODE: baseline
+        run: bash scripts/ci/check_coverage_thresholds.sh
