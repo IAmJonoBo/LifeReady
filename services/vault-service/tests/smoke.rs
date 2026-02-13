@@ -240,7 +240,7 @@ async fn download_document_rejects_invalid_principal_id() {
 }
 
 #[tokio::test]
-async fn download_document_returns_database_unavailable_without_pool() {
+async fn download_document_returns_bad_request_without_pool() {
     init_env();
     let app = vault_service::router();
     let req = Request::builder()
