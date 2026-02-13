@@ -18,9 +18,12 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use sqlx::{PgPool, Row};
 use std::fs;
+use std::io::Write;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::{path::PathBuf, str::FromStr};
+use zip::write::SimpleFileOptions;
+use zip::ZipWriter;
 
 #[derive(Clone)]
 struct AppState {
@@ -544,12 +547,16 @@ async fn export_case(
     fs::write(&checksums_path, checksums.join("\n"))
         .map_err(|error| invalid_request(Some(request_id), error.to_string()))?;
 
+    let zip_path = export_dir.with_extension("zip");
+    create_zip(&export_dir, &zip_path)
+        .map_err(|error| invalid_request(Some(request_id), error.to_string()))?;
+
     sqlx::query(
         "INSERT INTO case_artifacts (case_id, kind, blob_ref, sha256) VALUES ($1, $2, $3, $4)",
     )
     .bind(case_id)
     .bind("mhca39_export")
-    .bind(manifest_path.to_string_lossy().to_string())
+    .bind(zip_path.to_string_lossy().to_string())
     .bind(&manifest_sha256)
     .execute(pool)
     .await
@@ -827,6 +834,38 @@ fn sha256_bytes(bytes: &[u8]) -> String {
 fn sha256_file(path: &PathBuf) -> Result<String, std::io::Error> {
     let bytes = fs::read(path)?;
     Ok(sha256_bytes(&bytes))
+}
+
+fn create_zip(source_dir: &std::path::Path, zip_path: &std::path::Path) -> Result<(), std::io::Error> {
+    let file = fs::File::create(zip_path)?;
+    let mut zip = ZipWriter::new(file);
+    let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+
+    for entry in walkdir::WalkDir::new(source_dir).into_iter().filter_map(|e| e.ok()) {
+        let path = entry.path();
+        let relative = path
+            .strip_prefix(source_dir)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+
+        if relative.as_os_str().is_empty() {
+            continue;
+        }
+
+        let name = relative.to_string_lossy().replace('\\', "/");
+        if path.is_dir() {
+            zip.add_directory(&name, options)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        } else {
+            zip.start_file(&name, options)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+            let data = fs::read(path)?;
+            zip.write_all(&data)?;
+        }
+    }
+
+    zip.finish()
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+    Ok(())
 }
 
 fn zero_hash() -> String {
