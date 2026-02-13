@@ -330,7 +330,7 @@ mod tests {
         for i in 0..count {
             let mut event = AuditEvent {
                 event_id: format!("event-{i}"),
-                created_at: format!("2025-01-01T00:00:0{i}Z"),
+                created_at: format!("2025-01-01T00:00:{:02}Z", i),
                 prev_hash: prev.clone(),
                 event_hash: "".into(),
                 event: AuditAppend {
