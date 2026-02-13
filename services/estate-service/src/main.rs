@@ -42,7 +42,12 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode},
+    };
     use tokio::sync::oneshot;
+    use tower::util::ServiceExt;
 
     #[tokio::test]
     async fn run_with_listener_stops_on_shutdown() {
@@ -56,5 +61,20 @@ mod tests {
         });
         let _ = tx.send(());
         handle.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn build_app_exposes_healthz() {
+        let app = build_app();
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/healthz")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
     }
 }

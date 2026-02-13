@@ -12,6 +12,17 @@ tags:
 security:
   - bearerAuth: []
 paths:
+  /readyz:
+    get:
+      tags: [auth]
+      security:
+        - {}
+      summary: Readiness check (dependencies available)
+      responses:
+        "200":
+          $ref: "./common.openapi.yaml#/components/responses/Ready"
+        "503":
+          $ref: "./common.openapi.yaml#/components/responses/NotReady"
   /v1/auth/login:
     post:
       tags: [auth]

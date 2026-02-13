@@ -58,6 +58,13 @@ components:
             items:
               type: string
               maxLength: 200
+    ReadinessStatus:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ready, not_ready]
   headers:
     X-Request-Id:
       description: Request correlation identifier
@@ -127,3 +134,21 @@ components:
         application/problem+json:
           schema:
             $ref: "#/components/schemas/ProblemDetails"
+    Ready:
+      description: Service and critical dependencies are ready to serve traffic
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/X-Request-Id"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ReadinessStatus"
+    NotReady:
+      description: Service is reachable but critical dependencies are not ready
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/X-Request-Id"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ReadinessStatus"

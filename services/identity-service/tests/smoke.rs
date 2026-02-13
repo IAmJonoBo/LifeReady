@@ -44,6 +44,25 @@ async fn healthz_exists() {
 }
 
 #[tokio::test]
+async fn readyz_exists() {
+    init_env();
+    let app = identity_service::router();
+    let req = Request::builder()
+        .uri("/readyz")
+        .body(Body::empty())
+        .unwrap();
+
+    let res = axum::Router::into_service(app).oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let body = res.into_body().collect().await.unwrap().to_bytes();
+    let payload: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(
+        payload.get("status").and_then(|v| v.as_str()),
+        Some("not_ready")
+    );
+}
+
+#[tokio::test]
 async fn unauthenticated_requests_return_problem_json_with_request_id() {
     init_env();
     let app = identity_service::router();

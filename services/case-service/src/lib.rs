@@ -42,6 +42,7 @@ pub fn router() -> Router {
 
     Router::new()
         .route("/healthz", get(healthz))
+        .route("/readyz", get(readyz))
         .route("/v1/cases/emergency-pack", post(create_emergency_pack))
         .route("/v1/cases/mhca39", post(create_mhca39))
         .route("/v1/cases/{case_id}/export", post(export_case))
@@ -56,6 +57,25 @@ pub fn router() -> Router {
 
 async fn healthz() -> &'static str {
     "ok"
+}
+
+async fn readyz(State(state): State<AppState>) -> (StatusCode, Json<serde_json::Value>) {
+    let db_ready = match &state.pool {
+        Some(pool) => sqlx::query("SELECT 1").execute(pool).await.is_ok(),
+        None => false,
+    };
+
+    if db_ready {
+        (
+            StatusCode::OK,
+            Json(serde_json::json!({"status": "ready", "database": "up"})),
+        )
+    } else {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({"status": "not_ready", "database": "down"})),
+        )
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -565,8 +585,8 @@ pub async fn check_db() -> Option<sqlx::PgPool> {
     };
 
     if let Err(error) = sqlx::query("SELECT 1").execute(&pool).await {
-        tracing::warn!(error = %error, "database ping failed; continuing");
-        return Some(pool);
+        tracing::warn!(error = %error, "database ping failed; readiness unavailable");
+        return None;
     }
 
     tracing::info!("database connected");
@@ -751,7 +771,15 @@ fn db_error_to_response(error: sqlx::Error, request_id: RequestId) -> axum::resp
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode},
+    };
+    use lifeready_auth::{AccessLevel, AuthConfig, Claims, Role, SensitivityTier};
+    use std::future::Future;
+    use std::net::SocketAddr;
     use std::sync::Mutex;
+    use tower::util::ServiceExt;
     use uuid::Uuid;
 
     static ENV_LOCK: Mutex<()> = Mutex::new(());
@@ -769,6 +797,32 @@ mod tests {
         }
 
         f();
+
+        for (key, value) in saved {
+            match value {
+                Some(value) => unsafe { std::env::set_var(key, value) },
+                None => unsafe { std::env::remove_var(key) },
+            }
+        }
+    }
+
+    async fn with_env_async<F, Fut>(vars: &[(&str, Option<&str>)], f: F)
+    where
+        F: FnOnce() -> Fut,
+        Fut: Future<Output = ()>,
+    {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let mut saved = Vec::with_capacity(vars.len());
+
+        for (key, value) in vars {
+            saved.push((*key, std::env::var(*key).ok()));
+            match value {
+                Some(value) => unsafe { std::env::set_var(*key, value) },
+                None => unsafe { std::env::remove_var(*key) },
+            }
+        }
+
+        f().await;
 
         for (key, value) in saved {
             match value {
@@ -838,5 +892,942 @@ mod tests {
                 assert_eq!(storage_dir_from_env(), PathBuf::from("storage"));
             },
         );
+    }
+
+    #[test]
+    fn env_dirs_honor_overrides() {
+        with_env(
+            &[
+                ("LOCAL_EXPORT_DIR", Some("custom-exports")),
+                ("LOCAL_STORAGE_DIR", Some("custom-storage")),
+            ],
+            || {
+                assert_eq!(export_dir_from_env(), PathBuf::from("custom-exports"));
+                assert_eq!(storage_dir_from_env(), PathBuf::from("custom-storage"));
+            },
+        );
+    }
+
+    #[test]
+    fn write_audit_jsonl_writes_events() {
+        let dir = std::env::temp_dir().join(format!("case-audit-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("audit.jsonl");
+
+        let events = vec![AuditEventLine {
+            event_id: Uuid::new_v4().to_string(),
+            created_at: Utc::now().to_rfc3339(),
+            prev_hash: zero_hash(),
+            event_hash: zero_hash(),
+            event: AuditAppend {
+                actor_principal_id: Uuid::new_v4().to_string(),
+                action: "case.export".into(),
+                tier: "amber".into(),
+                case_id: Some(Uuid::new_v4().to_string()),
+                payload: serde_json::json!({"ok": true}),
+            },
+        }];
+
+        write_audit_jsonl(&path, &events).unwrap();
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(content.contains("case.export"));
+    }
+
+    #[test]
+    fn db_error_to_response_returns_bad_request() {
+        let response = db_error_to_response(sqlx::Error::RowNotFound, RequestId(Uuid::new_v4()));
+        assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn addr_from_env_prefers_case_port_then_port_then_default() {
+        with_env(
+            &[
+                ("HOST", Some("127.0.0.1")),
+                ("CASE_PORT", Some("6010")),
+                ("PORT", Some("7010")),
+            ],
+            || {
+                let addr = addr_from_env(8084);
+                assert_eq!(addr, "127.0.0.1:6010".parse::<SocketAddr>().unwrap());
+            },
+        );
+
+        with_env(
+            &[
+                ("HOST", Some("0.0.0.0")),
+                ("CASE_PORT", None),
+                ("PORT", Some("7010")),
+            ],
+            || {
+                let addr = addr_from_env(8084);
+                assert_eq!(addr, "0.0.0.0:7010".parse::<SocketAddr>().unwrap());
+            },
+        );
+
+        with_env(
+            &[
+                ("HOST", Some("0.0.0.0")),
+                ("CASE_PORT", None),
+                ("PORT", None),
+            ],
+            || {
+                let addr = addr_from_env(8084);
+                assert_eq!(addr, "0.0.0.0:8084".parse::<SocketAddr>().unwrap());
+            },
+        );
+    }
+
+    #[tokio::test]
+    async fn check_db_returns_none_without_database_url() {
+        with_env_async(&[("DATABASE_URL", None)], || async {
+            assert!(check_db().await.is_none());
+        })
+        .await;
+    }
+
+    fn auth_token(access: AccessLevel) -> String {
+        let config = AuthConfig::new("test-secret-32-chars-minimum!!");
+        let claims = Claims::new(
+            "00000000-0000-0000-0000-000000000001",
+            Role::Principal,
+            vec![SensitivityTier::Amber],
+            access,
+            None,
+            300,
+        );
+        config.issue_token(&claims).expect("token")
+    }
+
+    fn auth_token_for_principal(
+        principal_id: &str,
+        role: Role,
+        tiers: Vec<SensitivityTier>,
+        access: AccessLevel,
+    ) -> String {
+        let config = AuthConfig::new("test-secret-32-chars-minimum!!");
+        let claims = Claims::new(principal_id, role, tiers, access, None, 300);
+        config.issue_token(&claims).expect("token")
+    }
+
+    fn auth_token_with(role: Role, tiers: Vec<SensitivityTier>, access: AccessLevel) -> String {
+        auth_token_for_principal("00000000-0000-0000-0000-000000000001", role, tiers, access)
+    }
+
+    #[tokio::test]
+    async fn emergency_pack_returns_bad_request_without_database_pool() {
+        with_env_async(
+            &[
+                ("LIFEREADY_ENV", Some("dev")),
+                ("JWT_SECRET", Some("test-secret-32-chars-minimum!!")),
+                ("DATABASE_URL", None),
+            ],
+            || async {
+                let app = router();
+                let body = serde_json::json!({
+                    "directive_document_ids": [],
+                    "emergency_contacts": []
+                })
+                .to_string();
+                let response = axum::Router::into_service(app)
+                    .oneshot(
+                        Request::builder()
+                            .method("POST")
+                            .uri("/v1/cases/emergency-pack")
+                            .header("content-type", "application/json")
+                            .header(
+                                "authorization",
+                                format!("Bearer {}", auth_token(AccessLevel::LimitedWrite)),
+                            )
+                            .body(Body::from(body))
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+
+                assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+            },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn create_mhca39_rejects_invalid_subject_person_id() {
+        with_env_async(
+            &[
+                ("LIFEREADY_ENV", Some("dev")),
+                ("JWT_SECRET", Some("test-secret-32-chars-minimum!!")),
+                (
+                    "DATABASE_URL",
+                    Some("postgres://postgres:postgres@127.0.0.1:5432/lifeready"),
+                ),
+            ],
+            || async {
+                let app = router();
+                let body = serde_json::json!({
+                    "subject_person_id": "not-a-uuid",
+                    "applicant_person_id": "00000000-0000-0000-0000-000000000002"
+                })
+                .to_string();
+                let response = axum::Router::into_service(app)
+                    .oneshot(
+                        Request::builder()
+                            .method("POST")
+                            .uri("/v1/cases/mhca39")
+                            .header("content-type", "application/json")
+                            .header(
+                                "authorization",
+                                format!("Bearer {}", auth_token(AccessLevel::LimitedWrite)),
+                            )
+                            .body(Body::from(body))
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+
+                assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+            },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn create_mhca39_rejects_invalid_applicant_person_id() {
+        with_env_async(
+            &[
+                ("LIFEREADY_ENV", Some("dev")),
+                ("JWT_SECRET", Some("test-secret-32-chars-minimum!!")),
+                (
+                    "DATABASE_URL",
+                    Some("postgres://postgres:postgres@127.0.0.1:5432/lifeready"),
+                ),
+            ],
+            || async {
+                let app = router();
+                let body = serde_json::json!({
+                    "subject_person_id": "00000000-0000-0000-0000-000000000003",
+                    "applicant_person_id": "not-a-uuid"
+                })
+                .to_string();
+                let response = axum::Router::into_service(app)
+                    .oneshot(
+                        Request::builder()
+                            .method("POST")
+                            .uri("/v1/cases/mhca39")
+                            .header("content-type", "application/json")
+                            .header(
+                                "authorization",
+                                format!("Bearer {}", auth_token(AccessLevel::LimitedWrite)),
+                            )
+                            .body(Body::from(body))
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+
+                assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+            },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn create_mhca39_rejects_invalid_principal_id() {
+        with_env_async(
+            &[
+                ("LIFEREADY_ENV", Some("dev")),
+                ("JWT_SECRET", Some("test-secret-32-chars-minimum!!")),
+                (
+                    "DATABASE_URL",
+                    Some("postgres://postgres:postgres@127.0.0.1:5432/lifeready"),
+                ),
+            ],
+            || async {
+                let app = router();
+                let body = serde_json::json!({
+                    "subject_person_id": "00000000-0000-0000-0000-000000000003",
+                    "applicant_person_id": "00000000-0000-0000-0000-000000000004"
+                })
+                .to_string();
+                let response = axum::Router::into_service(app)
+                    .oneshot(
+                        Request::builder()
+                            .method("POST")
+                            .uri("/v1/cases/mhca39")
+                            .header("content-type", "application/json")
+                            .header(
+                                "authorization",
+                                format!(
+                                    "Bearer {}",
+                                    auth_token_for_principal(
+                                        "not-a-uuid",
+                                        Role::Principal,
+                                        vec![SensitivityTier::Amber],
+                                        AccessLevel::LimitedWrite,
+                                    )
+                                ),
+                            )
+                            .body(Body::from(body))
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+
+                assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+            },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn create_mhca39_rejects_insufficient_role() {
+        with_env_async(
+            &[
+                ("LIFEREADY_ENV", Some("dev")),
+                ("JWT_SECRET", Some("test-secret-32-chars-minimum!!")),
+                (
+                    "DATABASE_URL",
+                    Some("postgres://postgres:postgres@127.0.0.1:5432/lifeready"),
+                ),
+            ],
+            || async {
+                let app = router();
+                let body = serde_json::json!({
+                    "subject_person_id": "00000000-0000-0000-0000-000000000003",
+                    "applicant_person_id": "00000000-0000-0000-0000-000000000004"
+                })
+                .to_string();
+                let response = axum::Router::into_service(app)
+                    .oneshot(
+                        Request::builder()
+                            .method("POST")
+                            .uri("/v1/cases/mhca39")
+                            .header("content-type", "application/json")
+                            .header(
+                                "authorization",
+                                format!(
+                                    "Bearer {}",
+                                    auth_token_with(
+                                        Role::EmergencyContact,
+                                        vec![SensitivityTier::Amber],
+                                        AccessLevel::LimitedWrite,
+                                    )
+                                ),
+                            )
+                            .body(Body::from(body))
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+
+                assert_eq!(response.status(), StatusCode::FORBIDDEN);
+            },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn create_mhca39_rejects_insufficient_tier() {
+        with_env_async(
+            &[
+                ("LIFEREADY_ENV", Some("dev")),
+                ("JWT_SECRET", Some("test-secret-32-chars-minimum!!")),
+                (
+                    "DATABASE_URL",
+                    Some("postgres://postgres:postgres@127.0.0.1:5432/lifeready"),
+                ),
+            ],
+            || async {
+                let app = router();
+                let body = serde_json::json!({
+                    "subject_person_id": "00000000-0000-0000-0000-000000000003",
+                    "applicant_person_id": "00000000-0000-0000-0000-000000000004"
+                })
+                .to_string();
+                let response = axum::Router::into_service(app)
+                    .oneshot(
+                        Request::builder()
+                            .method("POST")
+                            .uri("/v1/cases/mhca39")
+                            .header("content-type", "application/json")
+                            .header(
+                                "authorization",
+                                format!(
+                                    "Bearer {}",
+                                    auth_token_with(
+                                        Role::Principal,
+                                        vec![SensitivityTier::Green],
+                                        AccessLevel::LimitedWrite,
+                                    )
+                                ),
+                            )
+                            .body(Body::from(body))
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+
+                assert_eq!(response.status(), StatusCode::FORBIDDEN);
+            },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn create_mhca39_rejects_missing_scope() {
+        with_env_async(
+            &[
+                ("LIFEREADY_ENV", Some("dev")),
+                ("JWT_SECRET", Some("test-secret-32-chars-minimum!!")),
+                (
+                    "DATABASE_URL",
+                    Some("postgres://postgres:postgres@127.0.0.1:5432/lifeready"),
+                ),
+            ],
+            || async {
+                let app = router();
+                let body = serde_json::json!({
+                    "subject_person_id": "00000000-0000-0000-0000-000000000003",
+                    "applicant_person_id": "00000000-0000-0000-0000-000000000004"
+                })
+                .to_string();
+                let response = axum::Router::into_service(app)
+                    .oneshot(
+                        Request::builder()
+                            .method("POST")
+                            .uri("/v1/cases/mhca39")
+                            .header("content-type", "application/json")
+                            .header(
+                                "authorization",
+                                format!(
+                                    "Bearer {}",
+                                    auth_token_with(
+                                        Role::Principal,
+                                        vec![SensitivityTier::Amber],
+                                        AccessLevel::ReadOnlyAll,
+                                    )
+                                ),
+                            )
+                            .body(Body::from(body))
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+
+                assert_eq!(response.status(), StatusCode::FORBIDDEN);
+            },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn attach_evidence_rejects_invalid_case_id() {
+        with_env_async(
+            &[
+                ("LIFEREADY_ENV", Some("dev")),
+                ("JWT_SECRET", Some("test-secret-32-chars-minimum!!")),
+                (
+                    "DATABASE_URL",
+                    Some("postgres://postgres:postgres@127.0.0.1:5432/lifeready"),
+                ),
+            ],
+            || async {
+                let app = router();
+                let body = serde_json::json!({
+                    "document_id": "00000000-0000-0000-0000-000000000003"
+                })
+                .to_string();
+                let response = axum::Router::into_service(app)
+                    .oneshot(
+                        Request::builder()
+                            .method("PUT")
+                            .uri("/v1/cases/not-a-uuid/evidence/slot")
+                            .header("content-type", "application/json")
+                            .header(
+                                "authorization",
+                                format!("Bearer {}", auth_token(AccessLevel::LimitedWrite)),
+                            )
+                            .body(Body::from(body))
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+
+                assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+            },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn attach_evidence_rejects_invalid_principal_id() {
+        with_env_async(
+            &[
+                ("LIFEREADY_ENV", Some("dev")),
+                ("JWT_SECRET", Some("test-secret-32-chars-minimum!!")),
+                (
+                    "DATABASE_URL",
+                    Some("postgres://postgres:postgres@127.0.0.1:5432/lifeready"),
+                ),
+            ],
+            || async {
+                let app = router();
+                let body = serde_json::json!({
+                    "document_id": "00000000-0000-0000-0000-000000000003"
+                })
+                .to_string();
+                let response = axum::Router::into_service(app)
+                    .oneshot(
+                        Request::builder()
+                            .method("PUT")
+                            .uri("/v1/cases/00000000-0000-0000-0000-000000000002/evidence/slot")
+                            .header("content-type", "application/json")
+                            .header(
+                                "authorization",
+                                format!(
+                                    "Bearer {}",
+                                    auth_token_for_principal(
+                                        "not-a-uuid",
+                                        Role::Principal,
+                                        vec![SensitivityTier::Amber],
+                                        AccessLevel::LimitedWrite,
+                                    )
+                                ),
+                            )
+                            .body(Body::from(body))
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+
+                assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+            },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn attach_evidence_rejects_invalid_document_id() {
+        with_env_async(
+            &[
+                ("LIFEREADY_ENV", Some("dev")),
+                ("JWT_SECRET", Some("test-secret-32-chars-minimum!!")),
+                (
+                    "DATABASE_URL",
+                    Some("postgres://postgres:postgres@127.0.0.1:5432/lifeready"),
+                ),
+            ],
+            || async {
+                let app = router();
+                let body = serde_json::json!({
+                    "document_id": "not-a-uuid"
+                })
+                .to_string();
+                let response = axum::Router::into_service(app)
+                    .oneshot(
+                        Request::builder()
+                            .method("PUT")
+                            .uri("/v1/cases/00000000-0000-0000-0000-000000000002/evidence/slot")
+                            .header("content-type", "application/json")
+                            .header(
+                                "authorization",
+                                format!("Bearer {}", auth_token(AccessLevel::LimitedWrite)),
+                            )
+                            .body(Body::from(body))
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+
+                assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+            },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn export_case_rejects_invalid_case_id() {
+        with_env_async(
+            &[
+                ("LIFEREADY_ENV", Some("dev")),
+                ("JWT_SECRET", Some("test-secret-32-chars-minimum!!")),
+                (
+                    "DATABASE_URL",
+                    Some("postgres://postgres:postgres@127.0.0.1:5432/lifeready"),
+                ),
+            ],
+            || async {
+                let app = router();
+                let response = axum::Router::into_service(app)
+                    .oneshot(
+                        Request::builder()
+                            .method("POST")
+                            .uri("/v1/cases/not-a-uuid/export")
+                            .header(
+                                "authorization",
+                                format!("Bearer {}", auth_token(AccessLevel::ReadOnlyPacks)),
+                            )
+                            .body(Body::empty())
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+
+                assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+            },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn emergency_pack_rejects_insufficient_role() {
+        with_env_async(
+            &[
+                ("LIFEREADY_ENV", Some("dev")),
+                ("JWT_SECRET", Some("test-secret-32-chars-minimum!!")),
+                (
+                    "DATABASE_URL",
+                    Some("postgres://postgres:postgres@127.0.0.1:5432/lifeready"),
+                ),
+            ],
+            || async {
+                let app = router();
+                let body = serde_json::json!({
+                    "directive_document_ids": [],
+                    "emergency_contacts": []
+                })
+                .to_string();
+                let response = axum::Router::into_service(app)
+                    .oneshot(
+                        Request::builder()
+                            .method("POST")
+                            .uri("/v1/cases/emergency-pack")
+                            .header("content-type", "application/json")
+                            .header(
+                                "authorization",
+                                format!(
+                                    "Bearer {}",
+                                    auth_token_with(
+                                        Role::EmergencyContact,
+                                        vec![SensitivityTier::Amber],
+                                        AccessLevel::LimitedWrite,
+                                    )
+                                ),
+                            )
+                            .body(Body::from(body))
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+
+                assert_eq!(response.status(), StatusCode::FORBIDDEN);
+            },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn emergency_pack_rejects_insufficient_tier() {
+        with_env_async(
+            &[
+                ("LIFEREADY_ENV", Some("dev")),
+                ("JWT_SECRET", Some("test-secret-32-chars-minimum!!")),
+                (
+                    "DATABASE_URL",
+                    Some("postgres://postgres:postgres@127.0.0.1:5432/lifeready"),
+                ),
+            ],
+            || async {
+                let app = router();
+                let body = serde_json::json!({
+                    "directive_document_ids": [],
+                    "emergency_contacts": []
+                })
+                .to_string();
+                let response = axum::Router::into_service(app)
+                    .oneshot(
+                        Request::builder()
+                            .method("POST")
+                            .uri("/v1/cases/emergency-pack")
+                            .header("content-type", "application/json")
+                            .header(
+                                "authorization",
+                                format!(
+                                    "Bearer {}",
+                                    auth_token_with(
+                                        Role::Principal,
+                                        vec![SensitivityTier::Green],
+                                        AccessLevel::LimitedWrite,
+                                    )
+                                ),
+                            )
+                            .body(Body::from(body))
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+
+                assert_eq!(response.status(), StatusCode::FORBIDDEN);
+            },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn emergency_pack_rejects_read_only_scope() {
+        with_env_async(
+            &[
+                ("LIFEREADY_ENV", Some("dev")),
+                ("JWT_SECRET", Some("test-secret-32-chars-minimum!!")),
+                (
+                    "DATABASE_URL",
+                    Some("postgres://postgres:postgres@127.0.0.1:5432/lifeready"),
+                ),
+            ],
+            || async {
+                let app = router();
+                let body = serde_json::json!({
+                    "directive_document_ids": [],
+                    "emergency_contacts": []
+                })
+                .to_string();
+                let response = axum::Router::into_service(app)
+                    .oneshot(
+                        Request::builder()
+                            .method("POST")
+                            .uri("/v1/cases/emergency-pack")
+                            .header("content-type", "application/json")
+                            .header(
+                                "authorization",
+                                format!(
+                                    "Bearer {}",
+                                    auth_token_with(
+                                        Role::Principal,
+                                        vec![SensitivityTier::Amber],
+                                        AccessLevel::ReadOnlyAll,
+                                    )
+                                ),
+                            )
+                            .body(Body::from(body))
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+
+                assert_eq!(response.status(), StatusCode::FORBIDDEN);
+            },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn attach_evidence_rejects_insufficient_role() {
+        with_env_async(
+            &[
+                ("LIFEREADY_ENV", Some("dev")),
+                ("JWT_SECRET", Some("test-secret-32-chars-minimum!!")),
+                (
+                    "DATABASE_URL",
+                    Some("postgres://postgres:postgres@127.0.0.1:5432/lifeready"),
+                ),
+            ],
+            || async {
+                let app = router();
+                let body = serde_json::json!({
+                    "document_id": "00000000-0000-0000-0000-000000000003"
+                })
+                .to_string();
+                let response = axum::Router::into_service(app)
+                    .oneshot(
+                        Request::builder()
+                            .method("PUT")
+                            .uri("/v1/cases/not-a-uuid/evidence/slot")
+                            .header("content-type", "application/json")
+                            .header(
+                                "authorization",
+                                format!(
+                                    "Bearer {}",
+                                    auth_token_with(
+                                        Role::EmergencyContact,
+                                        vec![SensitivityTier::Amber],
+                                        AccessLevel::LimitedWrite,
+                                    )
+                                ),
+                            )
+                            .body(Body::from(body))
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+
+                assert_eq!(response.status(), StatusCode::FORBIDDEN);
+            },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn export_case_rejects_missing_scope() {
+        with_env_async(
+            &[
+                ("LIFEREADY_ENV", Some("dev")),
+                ("JWT_SECRET", Some("test-secret-32-chars-minimum!!")),
+                (
+                    "DATABASE_URL",
+                    Some("postgres://postgres:postgres@127.0.0.1:5432/lifeready"),
+                ),
+            ],
+            || async {
+                let app = router();
+                let response = axum::Router::into_service(app)
+                    .oneshot(
+                        Request::builder()
+                            .method("POST")
+                            .uri("/v1/cases/not-a-uuid/export")
+                            .header(
+                                "authorization",
+                                format!(
+                                    "Bearer {}",
+                                    auth_token_with(
+                                        Role::Principal,
+                                        vec![SensitivityTier::Amber],
+                                        AccessLevel::LimitedWrite,
+                                    )
+                                ),
+                            )
+                            .body(Body::empty())
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+
+                assert_eq!(response.status(), StatusCode::FORBIDDEN);
+            },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn export_case_rejects_insufficient_role() {
+        with_env_async(
+            &[
+                ("LIFEREADY_ENV", Some("dev")),
+                ("JWT_SECRET", Some("test-secret-32-chars-minimum!!")),
+                (
+                    "DATABASE_URL",
+                    Some("postgres://postgres:postgres@127.0.0.1:5432/lifeready"),
+                ),
+            ],
+            || async {
+                let app = router();
+                let response = axum::Router::into_service(app)
+                    .oneshot(
+                        Request::builder()
+                            .method("POST")
+                            .uri("/v1/cases/00000000-0000-0000-0000-000000000002/export")
+                            .header(
+                                "authorization",
+                                format!(
+                                    "Bearer {}",
+                                    auth_token_with(
+                                        Role::EmergencyContact,
+                                        vec![SensitivityTier::Amber],
+                                        AccessLevel::ReadOnlyPacks,
+                                    )
+                                ),
+                            )
+                            .body(Body::empty())
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+
+                assert_eq!(response.status(), StatusCode::FORBIDDEN);
+            },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn export_case_rejects_insufficient_tier() {
+        with_env_async(
+            &[
+                ("LIFEREADY_ENV", Some("dev")),
+                ("JWT_SECRET", Some("test-secret-32-chars-minimum!!")),
+                (
+                    "DATABASE_URL",
+                    Some("postgres://postgres:postgres@127.0.0.1:5432/lifeready"),
+                ),
+            ],
+            || async {
+                let app = router();
+                let response = axum::Router::into_service(app)
+                    .oneshot(
+                        Request::builder()
+                            .method("POST")
+                            .uri("/v1/cases/00000000-0000-0000-0000-000000000002/export")
+                            .header(
+                                "authorization",
+                                format!(
+                                    "Bearer {}",
+                                    auth_token_with(
+                                        Role::Principal,
+                                        vec![SensitivityTier::Green],
+                                        AccessLevel::ReadOnlyPacks,
+                                    )
+                                ),
+                            )
+                            .body(Body::empty())
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+
+                assert_eq!(response.status(), StatusCode::FORBIDDEN);
+            },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn export_case_rejects_invalid_principal_id() {
+        with_env_async(
+            &[
+                ("LIFEREADY_ENV", Some("dev")),
+                ("JWT_SECRET", Some("test-secret-32-chars-minimum!!")),
+                (
+                    "DATABASE_URL",
+                    Some("postgres://postgres:postgres@127.0.0.1:5432/lifeready"),
+                ),
+            ],
+            || async {
+                let app = router();
+                let response = axum::Router::into_service(app)
+                    .oneshot(
+                        Request::builder()
+                            .method("POST")
+                            .uri("/v1/cases/00000000-0000-0000-0000-000000000002/export")
+                            .header(
+                                "authorization",
+                                format!(
+                                    "Bearer {}",
+                                    auth_token_for_principal(
+                                        "not-a-uuid",
+                                        Role::Principal,
+                                        vec![SensitivityTier::Amber],
+                                        AccessLevel::ReadOnlyPacks,
+                                    )
+                                ),
+                            )
+                            .body(Body::empty())
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+
+                assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+            },
+        )
+        .await;
     }
 }
