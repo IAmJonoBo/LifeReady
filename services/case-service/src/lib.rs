@@ -3615,4 +3615,353 @@ mod tests {
         )
         .await;
     }
+
+    // === Phase 3: State machine transition tests ===
+
+    #[test]
+    fn allowed_transitions_emergency_pack_draft_to_ready() {
+        let transitions = allowed_transitions("emergency_pack", "draft");
+        assert_eq!(transitions, &["ready"]);
+    }
+
+    #[test]
+    fn allowed_transitions_emergency_pack_ready_to_link_issued() {
+        let transitions = allowed_transitions("emergency_pack", "ready");
+        assert_eq!(transitions, &["link_issued"]);
+    }
+
+    #[test]
+    fn allowed_transitions_emergency_pack_link_issued() {
+        let transitions = allowed_transitions("emergency_pack", "link_issued");
+        assert!(transitions.contains(&"accessed"));
+        assert!(transitions.contains(&"revoked"));
+        assert!(transitions.contains(&"expired"));
+        assert_eq!(transitions.len(), 3);
+    }
+
+    #[test]
+    fn allowed_transitions_mhca39_full_workflow() {
+        assert_eq!(allowed_transitions("mhca39", "blocked"), &["evidence_collecting"]);
+        assert!(allowed_transitions("mhca39", "evidence_collecting").contains(&"draft_generated"));
+        assert!(allowed_transitions("mhca39", "evidence_collecting").contains(&"blocked"));
+        assert_eq!(allowed_transitions("mhca39", "draft_generated"), &["awaiting_oath"]);
+        assert_eq!(allowed_transitions("mhca39", "awaiting_oath"), &["exported"]);
+        assert_eq!(allowed_transitions("mhca39", "exported"), &["closed"]);
+    }
+
+    #[test]
+    fn allowed_transitions_will_prep_workflow() {
+        assert_eq!(allowed_transitions("will_prep_sa", "blocked"), &["ready"]);
+        assert_eq!(allowed_transitions("will_prep_sa", "ready"), &["exported"]);
+        assert!(allowed_transitions("will_prep_sa", "exported").contains(&"accessed"));
+        assert!(allowed_transitions("will_prep_sa", "exported").contains(&"revoked"));
+    }
+
+    #[test]
+    fn allowed_transitions_deceased_estate_workflow() {
+        assert_eq!(allowed_transitions("deceased_estate_reporting_sa", "blocked"), &["ready"]);
+        assert_eq!(allowed_transitions("deceased_estate_reporting_sa", "ready"), &["exported"]);
+        assert!(allowed_transitions("deceased_estate_reporting_sa", "exported").contains(&"accessed"));
+        assert!(allowed_transitions("deceased_estate_reporting_sa", "exported").contains(&"revoked"));
+    }
+
+    #[test]
+    fn allowed_transitions_popia_incident_workflow() {
+        assert_eq!(allowed_transitions("popia_incident", "draft"), &["ready"]);
+        assert_eq!(allowed_transitions("popia_incident", "ready"), &["exported"]);
+        assert_eq!(allowed_transitions("popia_incident", "exported"), &["closed"]);
+    }
+
+    #[test]
+    fn allowed_transitions_invalid_returns_empty() {
+        assert!(allowed_transitions("unknown_type", "draft").is_empty());
+        assert!(allowed_transitions("mhca39", "closed").is_empty());
+        assert!(allowed_transitions("emergency_pack", "exported").is_empty());
+    }
+
+    // === POPIA incident tests ===
+
+    #[test]
+    fn default_popia_incident_slots_contains_expected_items() {
+        let slots = default_popia_incident_slots();
+        assert!(slots.contains(&"incident_report".to_string()));
+        assert!(slots.contains(&"regulator_notification_draft".to_string()));
+        assert!(slots.contains(&"data_subject_notification_draft".to_string()));
+        assert_eq!(slots.len(), 5);
+    }
+
+    #[tokio::test]
+    async fn create_popia_incident_rejects_insufficient_role() {
+        with_env_async(
+            &[
+                ("LIFEREADY_ENV", Some("dev")),
+                ("JWT_SECRET", Some("test-secret-32-chars-minimum!!")),
+                (
+                    "DATABASE_URL",
+                    Some("postgres://postgres:postgres@127.0.0.1:5432/lifeready"),
+                ),
+            ],
+            || async {
+                let app = router();
+                let body = serde_json::json!({
+                    "incident_title": "Test Incident",
+                    "affected_data_classes": ["health"]
+                })
+                .to_string();
+                let response = axum::Router::into_service(app)
+                    .oneshot(
+                        Request::builder()
+                            .method("POST")
+                            .uri("/v1/cases/popia-incident")
+                            .header("content-type", "application/json")
+                            .header(
+                                "authorization",
+                                format!(
+                                    "Bearer {}",
+                                    auth_token_with(
+                                        Role::EmergencyContact,
+                                        vec![SensitivityTier::Amber],
+                                        AccessLevel::LimitedWrite,
+                                    )
+                                ),
+                            )
+                            .body(Body::from(body))
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+
+                assert_eq!(response.status(), StatusCode::FORBIDDEN);
+            },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn create_popia_incident_rejects_insufficient_tier() {
+        with_env_async(
+            &[
+                ("LIFEREADY_ENV", Some("dev")),
+                ("JWT_SECRET", Some("test-secret-32-chars-minimum!!")),
+                (
+                    "DATABASE_URL",
+                    Some("postgres://postgres:postgres@127.0.0.1:5432/lifeready"),
+                ),
+            ],
+            || async {
+                let app = router();
+                let body = serde_json::json!({
+                    "incident_title": "Test Incident",
+                    "affected_data_classes": ["health"]
+                })
+                .to_string();
+                let response = axum::Router::into_service(app)
+                    .oneshot(
+                        Request::builder()
+                            .method("POST")
+                            .uri("/v1/cases/popia-incident")
+                            .header("content-type", "application/json")
+                            .header(
+                                "authorization",
+                                format!(
+                                    "Bearer {}",
+                                    auth_token_with(
+                                        Role::Principal,
+                                        vec![SensitivityTier::Green],
+                                        AccessLevel::LimitedWrite,
+                                    )
+                                ),
+                            )
+                            .body(Body::from(body))
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+
+                assert_eq!(response.status(), StatusCode::FORBIDDEN);
+            },
+        )
+        .await;
+    }
+
+    // === State transition endpoint tests ===
+
+    #[tokio::test]
+    async fn transition_case_rejects_invalid_case_id() {
+        with_env_async(
+            &[
+                ("LIFEREADY_ENV", Some("dev")),
+                ("JWT_SECRET", Some("test-secret-32-chars-minimum!!")),
+                (
+                    "DATABASE_URL",
+                    Some("postgres://postgres:postgres@127.0.0.1:5432/lifeready"),
+                ),
+            ],
+            || async {
+                let app = router();
+                let body = serde_json::json!({
+                    "to_status": "ready"
+                })
+                .to_string();
+                let response = axum::Router::into_service(app)
+                    .oneshot(
+                        Request::builder()
+                            .method("POST")
+                            .uri("/v1/cases/not-a-uuid/transition")
+                            .header("content-type", "application/json")
+                            .header(
+                                "authorization",
+                                format!("Bearer {}", auth_token(AccessLevel::LimitedWrite)),
+                            )
+                            .body(Body::from(body))
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+
+                assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+            },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn transition_case_rejects_insufficient_role() {
+        with_env_async(
+            &[
+                ("LIFEREADY_ENV", Some("dev")),
+                ("JWT_SECRET", Some("test-secret-32-chars-minimum!!")),
+                (
+                    "DATABASE_URL",
+                    Some("postgres://postgres:postgres@127.0.0.1:5432/lifeready"),
+                ),
+            ],
+            || async {
+                let app = router();
+                let body = serde_json::json!({
+                    "to_status": "ready"
+                })
+                .to_string();
+                let response = axum::Router::into_service(app)
+                    .oneshot(
+                        Request::builder()
+                            .method("POST")
+                            .uri("/v1/cases/00000000-0000-0000-0000-000000000002/transition")
+                            .header("content-type", "application/json")
+                            .header(
+                                "authorization",
+                                format!(
+                                    "Bearer {}",
+                                    auth_token_with(
+                                        Role::EmergencyContact,
+                                        vec![SensitivityTier::Amber],
+                                        AccessLevel::LimitedWrite,
+                                    )
+                                ),
+                            )
+                            .body(Body::from(body))
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+
+                assert_eq!(response.status(), StatusCode::FORBIDDEN);
+            },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn transition_case_rejects_invalid_principal_id() {
+        with_env_async(
+            &[
+                ("LIFEREADY_ENV", Some("dev")),
+                ("JWT_SECRET", Some("test-secret-32-chars-minimum!!")),
+                (
+                    "DATABASE_URL",
+                    Some("postgres://postgres:postgres@127.0.0.1:5432/lifeready"),
+                ),
+            ],
+            || async {
+                let app = router();
+                let body = serde_json::json!({
+                    "to_status": "ready"
+                })
+                .to_string();
+                let response = axum::Router::into_service(app)
+                    .oneshot(
+                        Request::builder()
+                            .method("POST")
+                            .uri("/v1/cases/00000000-0000-0000-0000-000000000002/transition")
+                            .header("content-type", "application/json")
+                            .header(
+                                "authorization",
+                                format!(
+                                    "Bearer {}",
+                                    auth_token_for_principal(
+                                        "not-a-uuid",
+                                        Role::Principal,
+                                        vec![SensitivityTier::Amber],
+                                        AccessLevel::LimitedWrite,
+                                    )
+                                ),
+                            )
+                            .body(Body::from(body))
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+
+                assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+            },
+        )
+        .await;
+    }
+
+    // === Emergency pack template tests ===
+
+    #[test]
+    fn generate_emergency_pack_instructions_includes_contacts() {
+        let template = EmergencyPackTemplate {
+            case_id: Uuid::new_v4().to_string(),
+            exported_at: Utc::now().to_rfc3339(),
+            directive_documents: vec![],
+            emergency_contacts: vec![serde_json::json!({
+                "name": "Jane Doe",
+                "phone_e164": "+27821234567"
+            })],
+            disclaimer: "Test disclaimer".into(),
+        };
+        let instructions = generate_emergency_pack_instructions(&template);
+        assert!(instructions.contains("Emergency Directive Pack Instructions"));
+        assert!(instructions.contains("Jane Doe"));
+        assert!(instructions.contains("+27821234567"));
+        assert!(instructions.contains("audit-verifier"));
+    }
+
+    // === POPIA incident template tests ===
+
+    #[test]
+    fn generate_popia_incident_instructions_includes_section22() {
+        let template = PopiaIncidentTemplate {
+            case_id: Uuid::new_v4().to_string(),
+            exported_at: Utc::now().to_rfc3339(),
+            incident_title: "Data Breach Q3".into(),
+            description: Some("Unauthorized access to records".into()),
+            affected_data_classes: vec!["health".into(), "identity".into()],
+            affected_user_count: Some(42),
+            mitigation_steps: Some("Revoked access tokens".into()),
+            reported_at: Utc::now().to_rfc3339(),
+            evidence_checklist: vec![],
+            disclaimer: "Test disclaimer".into(),
+        };
+        let instructions = generate_popia_incident_instructions(&template);
+        assert!(instructions.contains("POPIA Security Compromise"));
+        assert!(instructions.contains("Section 22"));
+        assert!(instructions.contains("Data Breach Q3"));
+        assert!(instructions.contains("health, identity"));
+        assert!(instructions.contains("42"));
+        assert!(instructions.contains("Revoked access tokens"));
+        assert!(instructions.contains("Information Regulator"));
+    }
 }
