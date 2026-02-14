@@ -17,11 +17,17 @@ CREATE TABLE people (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE TYPE asset_category AS ENUM (
-  'property','bank_account','insurance_policy','vehicle','business_interest','digital_account','other'
-);
+DO $$ BEGIN
+  CREATE TYPE asset_category AS ENUM (
+    'property','bank_account','insurance_policy','vehicle','business_interest','digital_account','other'
+  );
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
-CREATE TYPE sensitivity_tier AS ENUM ('green','amber','red');
+DO $$ BEGIN
+  CREATE TYPE sensitivity_tier AS ENUM ('green','amber','red');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
 CREATE TABLE assets (
   asset_id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -42,8 +48,15 @@ CREATE TABLE instructions (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE TYPE role_name AS ENUM ('principal','proxy','executor_nominee','emergency_contact');
-CREATE TYPE grant_status AS ENUM ('invited','accepted','suspended','revoked');
+DO $$ BEGIN
+  CREATE TYPE role_name AS ENUM ('principal','proxy','executor_nominee','emergency_contact');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$ BEGIN
+  CREATE TYPE grant_status AS ENUM ('invited','accepted','suspended','revoked');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
 CREATE TABLE role_grants (
   grant_id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),

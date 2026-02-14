@@ -1,6 +1,9 @@
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
-CREATE TYPE sensitivity_tier AS ENUM ('green','amber','red');
+DO $$ BEGIN
+  CREATE TYPE sensitivity_tier AS ENUM ('green','amber','red');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
 -- Append-only event log (application must ONLY INSERT)
 CREATE TABLE audit_events (
