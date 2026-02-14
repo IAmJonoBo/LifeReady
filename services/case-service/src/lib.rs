@@ -730,7 +730,7 @@ async fn transition_case(
     if !valid_targets.contains(&payload.to_status.as_str()) {
         return Err(conflict(
             Some(request_id),
-            &format!(
+            format!(
                 "transition from '{}' to '{}' not allowed for {}",
                 current_status, payload.to_status, case_type
             ),
@@ -1458,7 +1458,7 @@ fn generate_mhca39_instructions(template: &Mhca39Template) -> String {
             item.slot_name, required, attached, doc
         ));
     }
-    md.push_str("\n");
+    md.push('\n');
 
     md.push_str("## Next Steps\n\n");
     md.push_str("1. Review all documents in the `documents/` folder\n");
@@ -1817,7 +1817,7 @@ fn generate_emergency_pack_instructions(template: &EmergencyPackTemplate) -> Str
     for doc in &template.directive_documents {
         md.push_str(&format!("- **{}**: {} ({})\n", doc.slot_name, doc.title, doc.document_type));
     }
-    md.push_str("\n");
+    md.push('\n');
 
     md.push_str("## Emergency Contacts\n\n");
     for contact in &template.emergency_contacts {
@@ -1825,7 +1825,7 @@ fn generate_emergency_pack_instructions(template: &EmergencyPackTemplate) -> Str
         let phone = contact.get("phone_e164").and_then(|v| v.as_str()).unwrap_or("-");
         md.push_str(&format!("- **{}**: {}\n", name, phone));
     }
-    md.push_str("\n");
+    md.push('\n');
 
     md.push_str("## Sharing\n\n");
     md.push_str("Share this pack via a time-limited link. All accesses are logged.\n");
@@ -2010,7 +2010,7 @@ fn generate_popia_incident_instructions(template: &PopiaIncidentTemplate) -> Str
             item.slot_name, required, attached, doc
         ));
     }
-    md.push_str("\n");
+    md.push('\n');
 
     md.push_str("## Verification\n\n");
     md.push_str("Use the `audit-verifier` CLI tool to verify the integrity of this bundle:\n\n");
@@ -2124,7 +2124,7 @@ fn default_popia_incident_slots() -> Vec<String> {
     ]
 }
 
-fn resolve_blob_ref(blob_ref: &str, storage_dir: &PathBuf) -> Option<PathBuf> {
+fn resolve_blob_ref(blob_ref: &str, storage_dir: &std::path::Path) -> Option<PathBuf> {
     let resolved = if let Some(path) = blob_ref.strip_prefix("file://") {
         PathBuf::from(path)
     } else if blob_ref.starts_with('/') {
@@ -2136,15 +2136,13 @@ fn resolve_blob_ref(blob_ref: &str, storage_dir: &PathBuf) -> Option<PathBuf> {
     // Prevent path traversal: resolved path must be within storage_dir.
     if let (Ok(canonical_storage), Ok(canonical_resolved)) =
         (storage_dir.canonicalize(), resolved.canonicalize())
-    {
-        if !canonical_resolved.starts_with(&canonical_storage) {
+        && !canonical_resolved.starts_with(&canonical_storage) {
             tracing::warn!(
                 blob_ref = blob_ref,
                 "resolve_blob_ref rejected: path escapes storage directory"
             );
             return None;
         }
-    }
 
     Some(resolved)
 }
@@ -2155,7 +2153,7 @@ fn sha256_bytes(bytes: &[u8]) -> String {
     hex::encode(hasher.finalize())
 }
 
-fn sha256_file(path: &PathBuf) -> Result<String, std::io::Error> {
+fn sha256_file(path: &std::path::Path) -> Result<String, std::io::Error> {
     let bytes = fs::read(path)?;
     Ok(sha256_bytes(&bytes))
 }
@@ -2175,7 +2173,7 @@ fn create_zip(
         let path = entry.path();
         let relative = path
             .strip_prefix(source_dir)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+            .map_err(std::io::Error::other)?;
 
         if relative.as_os_str().is_empty() {
             continue;
@@ -2184,17 +2182,17 @@ fn create_zip(
         let name = relative.to_string_lossy().replace('\\', "/");
         if path.is_dir() {
             zip.add_directory(&name, options)
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+                .map_err(std::io::Error::other)?;
         } else {
             zip.start_file(&name, options)
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+                .map_err(std::io::Error::other)?;
             let data = fs::read(path)?;
             zip.write_all(&data)?;
         }
     }
 
     zip.finish()
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        .map_err(std::io::Error::other)?;
     Ok(())
 }
 
@@ -2351,6 +2349,7 @@ fn db_error_to_response(error: sqlx::Error, request_id: RequestId) -> axum::resp
 }
 
 #[cfg(test)]
+#[allow(clippy::await_holding_lock)]
 mod tests {
     use super::*;
     use axum::{

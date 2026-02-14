@@ -1,3 +1,5 @@
+#![allow(clippy::await_holding_lock)]
+
 use axum::{
     body::Body,
     http::{header, Request, StatusCode},

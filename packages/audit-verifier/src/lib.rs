@@ -75,13 +75,12 @@ pub fn verify_audit_chain(input: &Path, expected_head: Option<&str>) -> Result<S
         last_hash = prev_hash.clone();
     }
 
-    if let Some(expected) = expected_head {
-        if expected != last_hash {
+    if let Some(expected) = expected_head
+        && expected != last_hash {
             return Err(format!(
                 "Head hash mismatch: expected {expected}, got {last_hash}"
             ));
         }
-    }
 
     Ok(last_hash)
 }

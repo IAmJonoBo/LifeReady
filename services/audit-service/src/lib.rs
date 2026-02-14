@@ -404,6 +404,7 @@ fn db_error_to_response(error: sqlx::Error, request_id: RequestId) -> axum::resp
 }
 
 #[cfg(test)]
+#[allow(clippy::await_holding_lock)]
 mod tests {
     use super::*;
     use axum::{
@@ -956,7 +957,7 @@ mod tests {
             },
         };
 
-        write_audit_jsonl(&path, &[event.clone()]).unwrap();
+        write_audit_jsonl(&path, std::slice::from_ref(&event)).unwrap();
         let content = std::fs::read_to_string(&path).unwrap();
         assert!(content.contains(&event.event_id));
     }
