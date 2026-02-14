@@ -4524,4 +4524,487 @@ mod tests {
         assert!(instructions.contains("Revoked access tokens"));
         assert!(instructions.contains("Information Regulator"));
     }
+
+    // === Death readiness tests ===
+
+    #[tokio::test]
+    async fn death_readiness_returns_bad_request_without_database_pool() {
+        with_env_async(
+            &[
+                ("LIFEREADY_ENV", Some("dev")),
+                ("JWT_SECRET", Some("test-secret-32-chars-minimum!!")),
+                ("DATABASE_URL", None),
+            ],
+            || async {
+                let app = router();
+                let body = serde_json::json!({
+                    "executor_nominee_person_id": "00000000-0000-0000-0000-000000000002"
+                })
+                .to_string();
+                let response = axum::Router::into_service(app)
+                    .oneshot(
+                        Request::builder()
+                            .method("POST")
+                            .uri("/v1/cases/death-readiness")
+                            .header("content-type", "application/json")
+                            .header(
+                                "authorization",
+                                format!("Bearer {}", auth_token(AccessLevel::LimitedWrite)),
+                            )
+                            .body(Body::from(body))
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+
+                assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+            },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn death_readiness_rejects_insufficient_role() {
+        with_env_async(
+            &[
+                ("LIFEREADY_ENV", Some("dev")),
+                ("JWT_SECRET", Some("test-secret-32-chars-minimum!!")),
+                (
+                    "DATABASE_URL",
+                    Some("postgres://postgres:postgres@127.0.0.1:5432/lifeready"),
+                ),
+            ],
+            || async {
+                let app = router();
+                let body = serde_json::json!({
+                    "executor_nominee_person_id": "00000000-0000-0000-0000-000000000002"
+                })
+                .to_string();
+                let response = axum::Router::into_service(app)
+                    .oneshot(
+                        Request::builder()
+                            .method("POST")
+                            .uri("/v1/cases/death-readiness")
+                            .header("content-type", "application/json")
+                            .header(
+                                "authorization",
+                                format!(
+                                    "Bearer {}",
+                                    auth_token_with(
+                                        Role::EmergencyContact,
+                                        vec![SensitivityTier::Amber],
+                                        AccessLevel::LimitedWrite,
+                                    )
+                                ),
+                            )
+                            .body(Body::from(body))
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+
+                assert_eq!(response.status(), StatusCode::FORBIDDEN);
+            },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn death_readiness_rejects_invalid_executor_nominee_id() {
+        with_env_async(
+            &[
+                ("LIFEREADY_ENV", Some("dev")),
+                ("JWT_SECRET", Some("test-secret-32-chars-minimum!!")),
+                (
+                    "DATABASE_URL",
+                    Some("postgres://postgres:postgres@127.0.0.1:5432/lifeready"),
+                ),
+            ],
+            || async {
+                let app = router();
+                let body = serde_json::json!({
+                    "executor_nominee_person_id": "not-a-uuid"
+                })
+                .to_string();
+                let response = axum::Router::into_service(app)
+                    .oneshot(
+                        Request::builder()
+                            .method("POST")
+                            .uri("/v1/cases/death-readiness")
+                            .header("content-type", "application/json")
+                            .header(
+                                "authorization",
+                                format!("Bearer {}", auth_token(AccessLevel::LimitedWrite)),
+                            )
+                            .body(Body::from(body))
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+
+                assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+            },
+        )
+        .await;
+    }
+
+    // === Case update (PATCH) tests ===
+
+    #[tokio::test]
+    async fn update_case_returns_bad_request_without_database_pool() {
+        with_env_async(
+            &[
+                ("LIFEREADY_ENV", Some("dev")),
+                ("JWT_SECRET", Some("test-secret-32-chars-minimum!!")),
+                ("DATABASE_URL", None),
+            ],
+            || async {
+                let app = router();
+                let body = serde_json::json!({
+                    "summary": "Updated incident summary"
+                })
+                .to_string();
+                let response = axum::Router::into_service(app)
+                    .oneshot(
+                        Request::builder()
+                            .method("PATCH")
+                            .uri("/v1/cases/00000000-0000-0000-0000-000000000001")
+                            .header("content-type", "application/json")
+                            .header(
+                                "authorization",
+                                format!("Bearer {}", auth_token(AccessLevel::LimitedWrite)),
+                            )
+                            .body(Body::from(body))
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+
+                assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+            },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn update_case_rejects_insufficient_role() {
+        with_env_async(
+            &[
+                ("LIFEREADY_ENV", Some("dev")),
+                ("JWT_SECRET", Some("test-secret-32-chars-minimum!!")),
+                (
+                    "DATABASE_URL",
+                    Some("postgres://postgres:postgres@127.0.0.1:5432/lifeready"),
+                ),
+            ],
+            || async {
+                let app = router();
+                let body = serde_json::json!({
+                    "summary": "Updated incident"
+                })
+                .to_string();
+                let response = axum::Router::into_service(app)
+                    .oneshot(
+                        Request::builder()
+                            .method("PATCH")
+                            .uri("/v1/cases/00000000-0000-0000-0000-000000000001")
+                            .header("content-type", "application/json")
+                            .header(
+                                "authorization",
+                                format!(
+                                    "Bearer {}",
+                                    auth_token_with(
+                                        Role::EmergencyContact,
+                                        vec![SensitivityTier::Amber],
+                                        AccessLevel::LimitedWrite,
+                                    )
+                                ),
+                            )
+                            .body(Body::from(body))
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+
+                assert_eq!(response.status(), StatusCode::FORBIDDEN);
+            },
+        )
+        .await;
+    }
+
+    // === Link/revoke tests ===
+
+    #[tokio::test]
+    async fn link_case_returns_bad_request_without_database_pool() {
+        with_env_async(
+            &[
+                ("LIFEREADY_ENV", Some("dev")),
+                ("JWT_SECRET", Some("test-secret-32-chars-minimum!!")),
+                ("DATABASE_URL", None),
+            ],
+            || async {
+                let app = router();
+                let body = serde_json::json!({
+                    "expires_in_hours": 24
+                })
+                .to_string();
+                let response = axum::Router::into_service(app)
+                    .oneshot(
+                        Request::builder()
+                            .method("POST")
+                            .uri("/v1/cases/00000000-0000-0000-0000-000000000001/link")
+                            .header("content-type", "application/json")
+                            .header(
+                                "authorization",
+                                format!("Bearer {}", auth_token(AccessLevel::LimitedWrite)),
+                            )
+                            .body(Body::from(body))
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+
+                assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+            },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn link_case_rejects_insufficient_role() {
+        with_env_async(
+            &[
+                ("LIFEREADY_ENV", Some("dev")),
+                ("JWT_SECRET", Some("test-secret-32-chars-minimum!!")),
+                (
+                    "DATABASE_URL",
+                    Some("postgres://postgres:postgres@127.0.0.1:5432/lifeready"),
+                ),
+            ],
+            || async {
+                let app = router();
+                let body = serde_json::json!({
+                    "expires_in_hours": 24
+                })
+                .to_string();
+                let response = axum::Router::into_service(app)
+                    .oneshot(
+                        Request::builder()
+                            .method("POST")
+                            .uri("/v1/cases/00000000-0000-0000-0000-000000000001/link")
+                            .header("content-type", "application/json")
+                            .header(
+                                "authorization",
+                                format!(
+                                    "Bearer {}",
+                                    auth_token_with(
+                                        Role::EmergencyContact,
+                                        vec![SensitivityTier::Amber],
+                                        AccessLevel::LimitedWrite,
+                                    )
+                                ),
+                            )
+                            .body(Body::from(body))
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+
+                assert_eq!(response.status(), StatusCode::FORBIDDEN);
+            },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn revoke_case_returns_bad_request_without_database_pool() {
+        with_env_async(
+            &[
+                ("LIFEREADY_ENV", Some("dev")),
+                ("JWT_SECRET", Some("test-secret-32-chars-minimum!!")),
+                ("DATABASE_URL", None),
+            ],
+            || async {
+                let app = router();
+                let response = axum::Router::into_service(app)
+                    .oneshot(
+                        Request::builder()
+                            .method("POST")
+                            .uri("/v1/cases/00000000-0000-0000-0000-000000000001/revoke")
+                            .header("content-type", "application/json")
+                            .header(
+                                "authorization",
+                                format!("Bearer {}", auth_token(AccessLevel::LimitedWrite)),
+                            )
+                            .body(Body::empty())
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+
+                assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+            },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn revoke_case_rejects_insufficient_role() {
+        with_env_async(
+            &[
+                ("LIFEREADY_ENV", Some("dev")),
+                ("JWT_SECRET", Some("test-secret-32-chars-minimum!!")),
+                (
+                    "DATABASE_URL",
+                    Some("postgres://postgres:postgres@127.0.0.1:5432/lifeready"),
+                ),
+            ],
+            || async {
+                let app = router();
+                let response = axum::Router::into_service(app)
+                    .oneshot(
+                        Request::builder()
+                            .method("POST")
+                            .uri("/v1/cases/00000000-0000-0000-0000-000000000001/revoke")
+                            .header("content-type", "application/json")
+                            .header(
+                                "authorization",
+                                format!(
+                                    "Bearer {}",
+                                    auth_token_with(
+                                        Role::EmergencyContact,
+                                        vec![SensitivityTier::Amber],
+                                        AccessLevel::LimitedWrite,
+                                    )
+                                ),
+                            )
+                            .body(Body::empty())
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+
+                assert_eq!(response.status(), StatusCode::FORBIDDEN);
+            },
+        )
+        .await;
+    }
+
+    // === Death readiness template + instructions tests ===
+
+    #[test]
+    fn generate_death_readiness_instructions_includes_executor_nominee() {
+        let template = DeathReadinessTemplate {
+            case_id: Uuid::new_v4().to_string(),
+            exported_at: Utc::now().to_rfc3339(),
+            executor_nominee_person_id: "00000000-0000-0000-0000-000000000099".into(),
+            asset_documents: vec![],
+            contact_documents: vec![],
+            notes: Some("Test notes".into()),
+        };
+        let instructions = generate_death_readiness_instructions(&template);
+        assert!(instructions.contains("Death Readiness Pack"));
+        assert!(instructions.contains("Executor nominee"));
+        assert!(instructions.contains("South Africa"));
+        assert!(instructions.contains("does not constitute legal advice"));
+        assert!(instructions.contains("00000000-0000-0000-0000-000000000099"));
+        assert!(instructions.contains("No Credential Release"));
+        assert!(instructions.contains("audit-verifier"));
+    }
+
+    // === State machine transition tests for new types ===
+
+    #[test]
+    fn allowed_transitions_death_readiness_full_workflow() {
+        assert_eq!(allowed_transitions("death_readiness", "draft"), &["ready"]);
+        assert_eq!(allowed_transitions("death_readiness", "ready"), &["exported"]);
+        assert_eq!(allowed_transitions("death_readiness", "exported"), &["closed"]);
+    }
+
+    // === Tier gating / IDOR negative tests ===
+
+    #[tokio::test]
+    async fn death_readiness_rejects_green_tier() {
+        with_env_async(
+            &[
+                ("LIFEREADY_ENV", Some("dev")),
+                ("JWT_SECRET", Some("test-secret-32-chars-minimum!!")),
+                (
+                    "DATABASE_URL",
+                    Some("postgres://postgres:postgres@127.0.0.1:5432/lifeready"),
+                ),
+            ],
+            || async {
+                let app = router();
+                let body = serde_json::json!({
+                    "executor_nominee_person_id": "00000000-0000-0000-0000-000000000002"
+                })
+                .to_string();
+                let response = axum::Router::into_service(app)
+                    .oneshot(
+                        Request::builder()
+                            .method("POST")
+                            .uri("/v1/cases/death-readiness")
+                            .header("content-type", "application/json")
+                            .header(
+                                "authorization",
+                                format!(
+                                    "Bearer {}",
+                                    auth_token_with(
+                                        Role::Principal,
+                                        vec![SensitivityTier::Green],
+                                        AccessLevel::LimitedWrite,
+                                    )
+                                ),
+                            )
+                            .body(Body::from(body))
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+
+                assert_eq!(response.status(), StatusCode::FORBIDDEN);
+            },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn update_case_rejects_invalid_case_id() {
+        with_env_async(
+            &[
+                ("LIFEREADY_ENV", Some("dev")),
+                ("JWT_SECRET", Some("test-secret-32-chars-minimum!!")),
+                (
+                    "DATABASE_URL",
+                    Some("postgres://postgres:postgres@127.0.0.1:5432/lifeready"),
+                ),
+            ],
+            || async {
+                let app = router();
+                let body = serde_json::json!({
+                    "summary": "test"
+                })
+                .to_string();
+                let response = axum::Router::into_service(app)
+                    .oneshot(
+                        Request::builder()
+                            .method("PATCH")
+                            .uri("/v1/cases/not-a-uuid")
+                            .header("content-type", "application/json")
+                            .header(
+                                "authorization",
+                                format!("Bearer {}", auth_token(AccessLevel::LimitedWrite)),
+                            )
+                            .body(Body::from(body))
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+
+                assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+            },
+        )
+        .await;
+    }
 }
