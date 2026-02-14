@@ -2,7 +2,7 @@ use axum::{
     Json, Router,
     extract::{Extension, Path, State},
     http::StatusCode,
-    routing::{get, post, put},
+    routing::{get, patch, post, put},
 };
 use chrono::Utc;
 use lifeready_auth::{
@@ -54,6 +54,10 @@ pub fn router() -> Router {
             post(create_deceased_estate_sa),
         )
         .route("/v1/cases/popia-incident", post(create_popia_incident))
+        .route("/v1/cases/death-readiness", post(create_death_readiness))
+        .route("/v1/cases/{case_id}", patch(update_case))
+        .route("/v1/cases/{case_id}/link", post(link_case))
+        .route("/v1/cases/{case_id}/revoke", post(revoke_case))
         .route("/v1/cases/{case_id}/export", post(export_case))
         .route(
             "/v1/cases/{case_id}/transition",
@@ -182,6 +186,40 @@ struct TransitionResponse {
     from_status: String,
     to_status: String,
     transitioned_at: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct DeathReadinessCreate {
+    executor_nominee_person_id: String,
+    asset_document_ids: Option<Vec<String>>,
+    contact_document_ids: Option<Vec<String>>,
+    notes: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CaseUpdate {
+    summary: Option<String>,
+    mitigation_steps: Option<String>,
+    affected_data_classes: Option<Vec<String>>,
+    affected_user_count: Option<i32>,
+    notes: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct LinkRequest {
+    expires_in_hours: Option<i32>,
+}
+
+#[derive(Debug, Serialize)]
+struct LinkResponse {
+    share_url: String,
+    expires_at: String,
+}
+
+#[derive(Debug, Serialize)]
+struct RevokeResponse {
+    case_id: String,
+    revoked_at: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -651,6 +689,317 @@ async fn create_popia_incident(
     Ok((StatusCode::CREATED, Json(response)))
 }
 
+async fn create_death_readiness(
+    State(state): State<AppState>,
+    ctx: RequestContext,
+    Extension(request_id): Extension<RequestId>,
+    Json(payload): Json<DeathReadinessCreate>,
+) -> Result<(StatusCode, Json<CaseResponse>), axum::response::Response> {
+    let pool = match &state.pool {
+        Some(pool) => pool,
+        None => return Err(invalid_request(Some(request_id), "database unavailable")),
+    };
+    require_role(&ctx, &[Role::Principal, Role::Proxy])
+        .map_err(|error| error.into_response(Some(request_id)))?;
+    require_tier(&ctx, TierRequirement::Min(SensitivityTier::Amber))
+        .map_err(|error| error.into_response(Some(request_id)))?;
+    require_scope(&ctx, "write:limited").map_err(|error| error.into_response(Some(request_id)))?;
+
+    let principal_id = parse_uuid(&ctx.principal_id)
+        .ok_or_else(|| invalid_request(Some(request_id), "invalid principal_id"))?;
+    let executor_nominee_id = parse_uuid(&payload.executor_nominee_person_id)
+        .ok_or_else(|| invalid_request(Some(request_id), "invalid executor_nominee_person_id"))?;
+
+    let asset_ids: Vec<uuid::Uuid> = payload
+        .asset_document_ids
+        .as_deref()
+        .unwrap_or_default()
+        .iter()
+        .map(|id| {
+            parse_uuid(id)
+                .ok_or_else(|| invalid_request(Some(request_id), "invalid asset_document_id"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let contact_ids: Vec<uuid::Uuid> = payload
+        .contact_document_ids
+        .as_deref()
+        .unwrap_or_default()
+        .iter()
+        .map(|id| {
+            parse_uuid(id)
+                .ok_or_else(|| invalid_request(Some(request_id), "invalid contact_document_id"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|error| db_error_to_response(error, request_id))?;
+
+    let row = sqlx::query(
+        "INSERT INTO cases (principal_id, case_type, status, blocked_reasons) \
+         VALUES ($1, 'death_readiness', 'draft', ARRAY[]::text[]) \
+         RETURNING case_id, created_at, status, blocked_reasons",
+    )
+    .bind(principal_id)
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(|error| db_error_to_response(error, request_id))?;
+
+    let case_id: uuid::Uuid = row
+        .try_get("case_id")
+        .map_err(|error| db_error_to_response(error, request_id))?;
+    let created_at: chrono::DateTime<Utc> = row
+        .try_get("created_at")
+        .map_err(|error| db_error_to_response(error, request_id))?;
+    let status: String = row
+        .try_get("status")
+        .map_err(|error| db_error_to_response(error, request_id))?;
+    let blocked_reasons: Vec<String> = row
+        .try_get("blocked_reasons")
+        .map_err(|error| db_error_to_response(error, request_id))?;
+
+    sqlx::query(
+        "INSERT INTO death_readiness_cases \
+         (case_id, executor_nominee_person_id, asset_document_ids, contact_document_ids, notes) \
+         VALUES ($1, $2, $3, $4, $5)",
+    )
+    .bind(case_id)
+    .bind(executor_nominee_id)
+    .bind(&asset_ids)
+    .bind(&contact_ids)
+    .bind(&payload.notes)
+    .execute(&mut *tx)
+    .await
+    .map_err(|error| db_error_to_response(error, request_id))?;
+
+    tx.commit()
+        .await
+        .map_err(|error| db_error_to_response(error, request_id))?;
+
+    let response = CaseResponse {
+        case_id: case_id.to_string(),
+        case_type: "death_readiness".into(),
+        status,
+        created_at: created_at.to_rfc3339(),
+        blocked_reasons,
+    };
+
+    Ok((StatusCode::CREATED, Json(response)))
+}
+
+async fn update_case(
+    State(state): State<AppState>,
+    ctx: RequestContext,
+    Extension(request_id): Extension<RequestId>,
+    Path(case_id): Path<String>,
+    Json(payload): Json<CaseUpdate>,
+) -> Result<Json<CaseResponse>, axum::response::Response> {
+    let pool = match &state.pool {
+        Some(pool) => pool,
+        None => return Err(invalid_request(Some(request_id), "database unavailable")),
+    };
+    require_role(&ctx, &[Role::Principal, Role::Proxy])
+        .map_err(|error| error.into_response(Some(request_id)))?;
+    require_tier(&ctx, TierRequirement::Min(SensitivityTier::Amber))
+        .map_err(|error| error.into_response(Some(request_id)))?;
+    require_scope(&ctx, "write:limited").map_err(|error| error.into_response(Some(request_id)))?;
+
+    let case_id =
+        parse_uuid(&case_id).ok_or_else(|| invalid_request(Some(request_id), "invalid case_id"))?;
+    let principal_id = parse_uuid(&ctx.principal_id)
+        .ok_or_else(|| invalid_request(Some(request_id), "invalid principal_id"))?;
+    ensure_case_access(pool, case_id, principal_id, request_id).await?;
+
+    let case_type = fetch_case_type(pool, case_id, request_id).await?;
+    if case_type != "popia_incident" {
+        return Err(invalid_request(
+            Some(request_id),
+            "PATCH updates are only supported for popia_incident cases",
+        ));
+    }
+
+    // Append-only: record a new revision, never overwrite existing data
+    let revision_number: i64 = sqlx::query_scalar(
+        "SELECT COALESCE(MAX(revision_number), 0) + 1 FROM incident_revisions WHERE case_id = $1",
+    )
+    .bind(case_id)
+    .fetch_one(pool)
+    .await
+    .map_err(|error| db_error_to_response(error, request_id))?;
+
+    sqlx::query(
+        "INSERT INTO incident_revisions \
+         (case_id, revision_number, summary, mitigation_steps, \
+          affected_data_classes, affected_user_count, notes, actor_principal_id) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+    )
+    .bind(case_id)
+    .bind(revision_number as i32)
+    .bind(&payload.summary)
+    .bind(&payload.mitigation_steps)
+    .bind(&payload.affected_data_classes.as_deref().unwrap_or_default())
+    .bind(payload.affected_user_count)
+    .bind(&payload.notes)
+    .bind(principal_id)
+    .execute(pool)
+    .await
+    .map_err(|error| db_error_to_response(error, request_id))?;
+
+    let row = sqlx::query(
+        "SELECT case_id, case_type::text, status::text, created_at, blocked_reasons \
+         FROM cases WHERE case_id = $1",
+    )
+    .bind(case_id)
+    .fetch_one(pool)
+    .await
+    .map_err(|error| db_error_to_response(error, request_id))?;
+
+    let response = CaseResponse {
+        case_id: row
+            .try_get::<uuid::Uuid, _>("case_id")
+            .map_err(|error| db_error_to_response(error, request_id))?
+            .to_string(),
+        case_type: row
+            .try_get::<String, _>("case_type")
+            .map_err(|error| db_error_to_response(error, request_id))?,
+        status: row
+            .try_get::<String, _>("status")
+            .map_err(|error| db_error_to_response(error, request_id))?,
+        created_at: row
+            .try_get::<chrono::DateTime<Utc>, _>("created_at")
+            .map_err(|error| db_error_to_response(error, request_id))?
+            .to_rfc3339(),
+        blocked_reasons: row
+            .try_get::<Vec<String>, _>("blocked_reasons")
+            .map_err(|error| db_error_to_response(error, request_id))?,
+    };
+
+    Ok(Json(response))
+}
+
+async fn link_case(
+    State(state): State<AppState>,
+    ctx: RequestContext,
+    Extension(request_id): Extension<RequestId>,
+    Path(case_id): Path<String>,
+    Json(payload): Json<LinkRequest>,
+) -> Result<Json<LinkResponse>, axum::response::Response> {
+    let pool = match &state.pool {
+        Some(pool) => pool,
+        None => return Err(invalid_request(Some(request_id), "database unavailable")),
+    };
+    require_role(&ctx, &[Role::Principal, Role::Proxy])
+        .map_err(|error| error.into_response(Some(request_id)))?;
+    require_tier(&ctx, TierRequirement::Min(SensitivityTier::Amber))
+        .map_err(|error| error.into_response(Some(request_id)))?;
+    require_scope(&ctx, "write:limited").map_err(|error| error.into_response(Some(request_id)))?;
+
+    let case_id =
+        parse_uuid(&case_id).ok_or_else(|| invalid_request(Some(request_id), "invalid case_id"))?;
+    let principal_id = parse_uuid(&ctx.principal_id)
+        .ok_or_else(|| invalid_request(Some(request_id), "invalid principal_id"))?;
+    ensure_case_access(pool, case_id, principal_id, request_id).await?;
+
+    let case_type = fetch_case_type(pool, case_id, request_id).await?;
+    if case_type != "emergency_pack" {
+        return Err(invalid_request(
+            Some(request_id),
+            "link issuance is only supported for emergency_pack cases",
+        ));
+    }
+
+    let expires_in_hours = payload.expires_in_hours.unwrap_or(24).clamp(1, 168);
+    let token = uuid::Uuid::new_v4().to_string();
+    let expires_at = Utc::now() + chrono::Duration::hours(i64::from(expires_in_hours));
+
+    sqlx::query(
+        "UPDATE emergency_pack_cases SET share_link_token = $1, share_link_expires_at = $2 \
+         WHERE case_id = $3",
+    )
+    .bind(&token)
+    .bind(expires_at)
+    .bind(case_id)
+    .execute(pool)
+    .await
+    .map_err(|error| db_error_to_response(error, request_id))?;
+
+    // Transition to link_issued if currently in ready state
+    let status_row = sqlx::query("SELECT status::text FROM cases WHERE case_id = $1")
+        .bind(case_id)
+        .fetch_one(pool)
+        .await
+        .map_err(|error| db_error_to_response(error, request_id))?;
+    let current_status: String = status_row
+        .try_get("status")
+        .map_err(|error| db_error_to_response(error, request_id))?;
+
+    let allowed = allowed_transitions(&case_type, &current_status);
+    if allowed.contains(&"link_issued") {
+        sqlx::query("UPDATE cases SET status = 'link_issued' WHERE case_id = $1")
+            .bind(case_id)
+            .execute(pool)
+            .await
+            .map_err(|error| db_error_to_response(error, request_id))?;
+    }
+
+    let share_url = format!("https://api.lifeready.local/case/v1/share/{}", token);
+    let response = LinkResponse {
+        share_url,
+        expires_at: expires_at.to_rfc3339(),
+    };
+
+    Ok(Json(response))
+}
+
+async fn revoke_case(
+    State(state): State<AppState>,
+    ctx: RequestContext,
+    Extension(request_id): Extension<RequestId>,
+    Path(case_id): Path<String>,
+) -> Result<Json<RevokeResponse>, axum::response::Response> {
+    let pool = match &state.pool {
+        Some(pool) => pool,
+        None => return Err(invalid_request(Some(request_id), "database unavailable")),
+    };
+    require_role(&ctx, &[Role::Principal, Role::Proxy])
+        .map_err(|error| error.into_response(Some(request_id)))?;
+    require_tier(&ctx, TierRequirement::Min(SensitivityTier::Amber))
+        .map_err(|error| error.into_response(Some(request_id)))?;
+    require_scope(&ctx, "write:limited").map_err(|error| error.into_response(Some(request_id)))?;
+
+    let case_id =
+        parse_uuid(&case_id).ok_or_else(|| invalid_request(Some(request_id), "invalid case_id"))?;
+    let principal_id = parse_uuid(&ctx.principal_id)
+        .ok_or_else(|| invalid_request(Some(request_id), "invalid principal_id"))?;
+    ensure_case_access(pool, case_id, principal_id, request_id).await?;
+
+    // Clear the share link immediately
+    sqlx::query(
+        "UPDATE emergency_pack_cases SET share_link_token = NULL, share_link_expires_at = NULL \
+         WHERE case_id = $1",
+    )
+    .bind(case_id)
+    .execute(pool)
+    .await
+    .map_err(|error| db_error_to_response(error, request_id))?;
+
+    // Transition to revoked
+    sqlx::query("UPDATE cases SET status = 'revoked' WHERE case_id = $1")
+        .bind(case_id)
+        .execute(pool)
+        .await
+        .map_err(|error| db_error_to_response(error, request_id))?;
+
+    let response = RevokeResponse {
+        case_id: case_id.to_string(),
+        revoked_at: Utc::now().to_rfc3339(),
+    };
+
+    Ok(Json(response))
+}
+
 /// Allowed state transitions per case type, based on PRD §7 state machines.
 fn allowed_transitions(case_type: &str, from: &str) -> &'static [&'static str] {
     match (case_type, from) {
@@ -675,6 +1024,10 @@ fn allowed_transitions(case_type: &str, from: &str) -> &'static [&'static str] {
         ("popia_incident", "draft") => &["ready"],
         ("popia_incident", "ready") => &["exported"],
         ("popia_incident", "exported") => &["closed"],
+        // §7.3 Death Readiness Pack
+        ("death_readiness", "draft") => &["ready"],
+        ("death_readiness", "ready") => &["exported"],
+        ("death_readiness", "exported") => &["closed"],
         _ => {
             tracing::debug!(
                 case_type = case_type,
@@ -978,6 +1331,36 @@ async fn export_case(
             };
             ("case_evidence", "case_evidence", slots)
         }
+        "death_readiness" => {
+            // Death readiness uses document references, not evidence slots.
+            let row = sqlx::query(
+                "SELECT asset_document_ids, contact_document_ids \
+                 FROM death_readiness_cases WHERE case_id = $1",
+            )
+            .bind(case_id)
+            .fetch_optional(pool)
+            .await
+            .map_err(|error| db_error_to_response(error, request_id))?;
+            let row = match row {
+                Some(r) => r,
+                None => {
+                    return Err(not_found(
+                        Some(request_id),
+                        "death_readiness case not found",
+                    ));
+                }
+            };
+            let asset_ids: Vec<uuid::Uuid> = row
+                .try_get("asset_document_ids")
+                .map_err(|error| db_error_to_response(error, request_id))?;
+            let contact_ids: Vec<uuid::Uuid> = row
+                .try_get("contact_document_ids")
+                .map_err(|error| db_error_to_response(error, request_id))?;
+            let mut all_ids = Vec::new();
+            all_ids.extend(asset_ids.iter().map(|id| id.to_string()));
+            all_ids.extend(contact_ids.iter().map(|id| id.to_string()));
+            ("__death_readiness__", "__death_readiness__", all_ids)
+        }
         _ => {
             return Err(invalid_request(
                 Some(request_id),
@@ -1054,8 +1437,59 @@ async fn export_case(
                 bundle_path: format!("documents/{}", document_id),
             });
         }
+    } else if evidence_table == "__death_readiness__" {
+        // Death readiness: fetch documents directly by ID
+        for (idx, doc_id_str) in required_slots.iter().enumerate() {
+            let document_id = parse_uuid(doc_id_str)
+                .ok_or_else(|| invalid_request(Some(request_id), "invalid document_id"))?;
+            let row = sqlx::query(
+                "SELECT d.document_id, d.document_type, d.title, v.sha256, v.blob_ref \
+                 FROM documents d \
+                 JOIN LATERAL ( \
+                    SELECT sha256, blob_ref FROM document_versions \
+                    WHERE document_id = d.document_id ORDER BY created_at DESC LIMIT 1 \
+                 ) v ON true \
+                 WHERE d.document_id = $1",
+            )
+            .bind(document_id)
+            .fetch_optional(pool)
+            .await
+            .map_err(|error| db_error_to_response(error, request_id))?;
+            let row = match row {
+                Some(r) => r,
+                None => continue, // Skip missing documents gracefully
+            };
+            let blob_ref: String = row
+                .try_get("blob_ref")
+                .map_err(|error| db_error_to_response(error, request_id))?;
+            let source_path = resolve_blob_ref(&blob_ref, &state.storage_dir)
+                .ok_or_else(|| invalid_request(Some(request_id), "invalid blob_ref"))?;
+            if !source_path.exists() {
+                continue; // Skip missing blobs gracefully
+            }
+            let dest_path = documents_dir.join(document_id.to_string());
+            fs::copy(&source_path, &dest_path)
+                .map_err(|error| invalid_request(Some(request_id), error.to_string()))?;
+
+            let sha256: String = row
+                .try_get("sha256")
+                .map_err(|error| db_error_to_response(error, request_id))?;
+            let document_type: String = row
+                .try_get("document_type")
+                .map_err(|error| db_error_to_response(error, request_id))?;
+            let title: String = row
+                .try_get("title")
+                .map_err(|error| db_error_to_response(error, request_id))?;
+            manifest_documents.push(ManifestDocument {
+                slot_name: format!("doc_{}", idx),
+                document_id: document_id.to_string(),
+                document_type,
+                title,
+                sha256,
+                bundle_path: format!("documents/{}", document_id),
+            });
+        }
     } else {
-        // Evidence-slot based types (mhca39, will_prep_sa, deceased_estate, popia_incident)
         let missing_query = format!(
             "SELECT slot_name FROM {} WHERE case_id = $1 AND document_id IS NULL",
             evidence_table
@@ -1221,6 +1655,20 @@ async fn export_case(
                 instr,
             )
         }
+        "death_readiness" => {
+            let template =
+                generate_death_readiness_template(pool, case_id, &manifest_documents, request_id)
+                    .await?;
+            let t_bytes = serde_json::to_vec_pretty(&template)
+                .map_err(|error| invalid_request(Some(request_id), error.to_string()))?;
+            let instr = generate_death_readiness_instructions(&template);
+            (
+                "death_readiness.json".to_string(),
+                t_bytes,
+                "instructions.md".to_string(),
+                instr,
+            )
+        }
         _ => {
             return Err(invalid_request(
                 Some(request_id),
@@ -1281,6 +1729,7 @@ async fn export_case(
         "will_prep_sa" => "will_prep_export",
         "deceased_estate_reporting_sa" => "deceased_estate_export",
         "popia_incident" => "popia_notification_export",
+        "death_readiness" => "death_readiness_export",
         _ => "case_export",
     };
 
@@ -2016,6 +2465,111 @@ fn generate_popia_incident_instructions(template: &PopiaIncidentTemplate) -> Str
     md.push_str("Use the `audit-verifier` CLI tool to verify the integrity of this bundle:\n\n");
     md.push_str("```bash\naudit-verifier verify-bundle --bundle <path-to-export>\n```\n");
 
+    md
+}
+
+/// Death Readiness template output structure
+#[derive(Debug, Serialize, Deserialize)]
+struct DeathReadinessTemplate {
+    /// Case identifier
+    case_id: String,
+    /// Export timestamp
+    exported_at: String,
+    /// Executor nominee person ID (not legally appointed yet)
+    executor_nominee_person_id: String,
+    /// Asset document index
+    asset_documents: Vec<ManifestDocument>,
+    /// Contact document index
+    contact_documents: Vec<ManifestDocument>,
+    /// User-provided notes
+    notes: Option<String>,
+}
+
+async fn generate_death_readiness_template(
+    pool: &PgPool,
+    case_id: uuid::Uuid,
+    manifest_documents: &[ManifestDocument],
+    request_id: RequestId,
+) -> Result<DeathReadinessTemplate, axum::response::Response> {
+    let row = sqlx::query(
+        "SELECT executor_nominee_person_id, asset_document_ids, contact_document_ids, notes \
+         FROM death_readiness_cases WHERE case_id = $1",
+    )
+    .bind(case_id)
+    .fetch_one(pool)
+    .await
+    .map_err(|error| db_error_to_response(error, request_id))?;
+
+    let executor_nominee_id: uuid::Uuid = row
+        .try_get("executor_nominee_person_id")
+        .map_err(|error| db_error_to_response(error, request_id))?;
+    let asset_ids: Vec<uuid::Uuid> = row
+        .try_get("asset_document_ids")
+        .map_err(|error| db_error_to_response(error, request_id))?;
+    let contact_ids: Vec<uuid::Uuid> = row
+        .try_get("contact_document_ids")
+        .map_err(|error| db_error_to_response(error, request_id))?;
+    let notes: Option<String> = row
+        .try_get("notes")
+        .map_err(|error| db_error_to_response(error, request_id))?;
+
+    let asset_set: std::collections::HashSet<String> =
+        asset_ids.iter().map(|id| id.to_string()).collect();
+    let contact_set: std::collections::HashSet<String> =
+        contact_ids.iter().map(|id| id.to_string()).collect();
+
+    let asset_documents: Vec<ManifestDocument> = manifest_documents
+        .iter()
+        .filter(|d| asset_set.contains(&d.document_id))
+        .cloned()
+        .collect();
+    let contact_documents: Vec<ManifestDocument> = manifest_documents
+        .iter()
+        .filter(|d| contact_set.contains(&d.document_id))
+        .cloned()
+        .collect();
+
+    Ok(DeathReadinessTemplate {
+        case_id: case_id.to_string(),
+        exported_at: Utc::now().to_rfc3339(),
+        executor_nominee_person_id: executor_nominee_id.to_string(),
+        asset_documents,
+        contact_documents,
+        notes,
+    })
+}
+
+fn generate_death_readiness_instructions(template: &DeathReadinessTemplate) -> String {
+    let mut md = String::new();
+    md.push_str("# Death Readiness Pack — Instructions\n\n");
+    md.push_str("**Jurisdiction:** South Africa\n\n");
+    md.push_str("> **IMPORTANT:** This pack does not constitute legal advice.\n");
+    md.push_str("> The \"Executor nominee\" referenced below is a nominated person who has NOT yet been legally appointed by the Master of the High Court.\n\n");
+    md.push_str("## Executor Nominee\n\n");
+    md.push_str(&format!("- Person ID: `{}`\n\n", template.executor_nominee_person_id));
+    md.push_str("## Asset Map\n\n");
+    if template.asset_documents.is_empty() {
+        md.push_str("No asset documents attached.\n\n");
+    } else {
+        for doc in &template.asset_documents {
+            md.push_str(&format!("- {} ({}): `{}`\n", doc.title, doc.document_type, doc.document_id));
+        }
+        md.push_str("\n");
+    }
+    md.push_str("## Contacts\n\n");
+    if template.contact_documents.is_empty() {
+        md.push_str("No contact documents attached.\n\n");
+    } else {
+        for doc in &template.contact_documents {
+            md.push_str(&format!("- {} ({}): `{}`\n", doc.title, doc.document_type, doc.document_id));
+        }
+        md.push_str("\n");
+    }
+    md.push_str("## No Credential Release\n\n");
+    md.push_str("v0.1 does not release any high-risk secrets or credentials.\n\n");
+    md.push_str("## Verification\n\n");
+    md.push_str("Verify bundle integrity using:\n\n");
+    md.push_str("```\naudit-verifier verify-bundle --bundle <export-dir>\n```\n");
     md
 }
 
