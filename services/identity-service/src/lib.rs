@@ -250,6 +250,7 @@ pub async fn check_db() -> Option<sqlx::PgPool> {
 }
 
 #[cfg(test)]
+#[allow(clippy::await_holding_lock)]
 mod tests {
     use super::*;
     use std::future::Future;

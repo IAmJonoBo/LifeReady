@@ -11,6 +11,7 @@ struct Args {
 }
 
 #[derive(Debug, Subcommand)]
+#[allow(clippy::enum_variant_names)]
 enum Command {
     VerifyAudit {
         #[arg(long)]
@@ -31,7 +32,9 @@ enum Command {
 }
 
 fn run(args: Args) -> Result<(), String> {
-    let result = match args.command {
+    
+
+    match args.command {
         Command::VerifyAudit { input, head_hash } => {
             verify_audit_chain(&input, head_hash.as_deref()).map(|head| {
                 println!("Audit chain OK. Head hash: {}", head);
@@ -46,9 +49,7 @@ fn run(args: Args) -> Result<(), String> {
         Command::VerifyBundle { bundle } => verify_bundle(&bundle).map(|_| {
             println!("Bundle OK.");
         }),
-    };
-
-    result
+    }
 }
 
 fn main() {

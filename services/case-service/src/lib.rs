@@ -53,7 +53,12 @@ pub fn router() -> Router {
             "/v1/cases/deceased-estate-sa",
             post(create_deceased_estate_sa),
         )
+        .route("/v1/cases/popia-incident", post(create_popia_incident))
         .route("/v1/cases/{case_id}/export", post(export_case))
+        .route(
+            "/v1/cases/{case_id}/transition",
+            post(transition_case),
+        )
         .route(
             "/v1/cases/{case_id}/evidence/{slot_name}",
             put(attach_evidence),
@@ -86,7 +91,7 @@ async fn readyz(State(state): State<AppState>) -> (StatusCode, Json<serde_json::
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[allow(dead_code)]
 struct EmergencyContact {
     name: String,
@@ -154,6 +159,31 @@ struct EvidenceSlotResponse {
     added_at: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct PopiaIncidentCreate {
+    incident_title: String,
+    description: Option<String>,
+    affected_data_classes: Vec<String>,
+    affected_user_count: Option<i32>,
+    mitigation_steps: Option<String>,
+    notes: Option<String>,
+    required_evidence_slots: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TransitionRequest {
+    to_status: String,
+    reason: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct TransitionResponse {
+    case_id: String,
+    from_status: String,
+    to_status: String,
+    transitioned_at: String,
+}
+
 #[derive(Debug, Serialize)]
 struct ExportManifest {
     case_id: String,
@@ -164,7 +194,7 @@ struct ExportManifest {
     documents: Vec<ManifestDocument>,
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 struct ManifestDocument {
     slot_name: String,
     document_id: String,
@@ -193,13 +223,28 @@ async fn create_emergency_pack(
     let principal_id = parse_uuid(&ctx.principal_id)
         .ok_or_else(|| invalid_request(Some(request_id), "invalid principal_id"))?;
 
+    let directive_ids: Vec<uuid::Uuid> = payload
+        .directive_document_ids
+        .iter()
+        .map(|id| {
+            parse_uuid(id).ok_or_else(|| invalid_request(Some(request_id), "invalid document_id"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let contacts_json = serde_json::to_value(&payload.emergency_contacts)
+        .map_err(|error| invalid_request(Some(request_id), error.to_string()))?;
+
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|error| db_error_to_response(error, request_id))?;
+
     let row = sqlx::query(
         "INSERT INTO cases (principal_id, case_type, status, blocked_reasons) \
          VALUES ($1, 'emergency_pack', 'draft', ARRAY[]::text[]) \
          RETURNING case_id, created_at, status, blocked_reasons",
     )
     .bind(principal_id)
-    .fetch_one(pool)
+    .fetch_one(&mut *tx)
     .await
     .map_err(|error| db_error_to_response(error, request_id))?;
 
@@ -216,6 +261,21 @@ async fn create_emergency_pack(
         .try_get("blocked_reasons")
         .map_err(|error| db_error_to_response(error, request_id))?;
 
+    sqlx::query(
+        "INSERT INTO emergency_pack_cases (case_id, directive_document_ids, emergency_contacts) \
+         VALUES ($1, $2, $3)",
+    )
+    .bind(case_id)
+    .bind(&directive_ids)
+    .bind(&contacts_json)
+    .execute(&mut *tx)
+    .await
+    .map_err(|error| db_error_to_response(error, request_id))?;
+
+    tx.commit()
+        .await
+        .map_err(|error| db_error_to_response(error, request_id))?;
+
     let response = CaseResponse {
         case_id: case_id.to_string(),
         case_type: "emergency_pack".into(),
@@ -223,8 +283,6 @@ async fn create_emergency_pack(
         created_at: created_at.to_rfc3339(),
         blocked_reasons,
     };
-
-    let _ = payload;
 
     Ok((StatusCode::CREATED, Json(response)))
 }
@@ -501,6 +559,221 @@ async fn create_deceased_estate_sa(
     Ok((StatusCode::CREATED, Json(response)))
 }
 
+async fn create_popia_incident(
+    State(state): State<AppState>,
+    ctx: RequestContext,
+    Extension(request_id): Extension<RequestId>,
+    Json(payload): Json<PopiaIncidentCreate>,
+) -> Result<(StatusCode, Json<CaseResponse>), axum::response::Response> {
+    let pool = match &state.pool {
+        Some(pool) => pool,
+        None => return Err(invalid_request(Some(request_id), "database unavailable")),
+    };
+    require_role(&ctx, &[Role::Principal, Role::Proxy])
+        .map_err(|error| error.into_response(Some(request_id)))?;
+    require_tier(&ctx, TierRequirement::Min(SensitivityTier::Amber))
+        .map_err(|error| error.into_response(Some(request_id)))?;
+    require_scope(&ctx, "write:limited").map_err(|error| error.into_response(Some(request_id)))?;
+
+    let principal_id = parse_uuid(&ctx.principal_id)
+        .ok_or_else(|| invalid_request(Some(request_id), "invalid principal_id"))?;
+    let required_slots = payload
+        .required_evidence_slots
+        .clone()
+        .unwrap_or_else(default_popia_incident_slots);
+
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|error| db_error_to_response(error, request_id))?;
+    let row = sqlx::query(
+        "INSERT INTO cases (principal_id, case_type, status, blocked_reasons) \
+         VALUES ($1, 'popia_incident', 'draft', ARRAY[]::text[]) \
+         RETURNING case_id, created_at, status, blocked_reasons",
+    )
+    .bind(principal_id)
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(|error| db_error_to_response(error, request_id))?;
+
+    let case_id: uuid::Uuid = row
+        .try_get("case_id")
+        .map_err(|error| db_error_to_response(error, request_id))?;
+    let created_at: chrono::DateTime<Utc> = row
+        .try_get("created_at")
+        .map_err(|error| db_error_to_response(error, request_id))?;
+    let status: String = row
+        .try_get("status")
+        .map_err(|error| db_error_to_response(error, request_id))?;
+    let blocked_reasons: Vec<String> = row
+        .try_get("blocked_reasons")
+        .map_err(|error| db_error_to_response(error, request_id))?;
+
+    sqlx::query(
+        "INSERT INTO popia_incident_cases (case_id, incident_title, description, \
+         affected_data_classes, affected_user_count, mitigation_steps, \
+         required_evidence_slots, notes) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+    )
+    .bind(case_id)
+    .bind(&payload.incident_title)
+    .bind(&payload.description)
+    .bind(&payload.affected_data_classes)
+    .bind(payload.affected_user_count)
+    .bind(&payload.mitigation_steps)
+    .bind(&required_slots)
+    .bind(&payload.notes)
+    .execute(&mut *tx)
+    .await
+    .map_err(|error| db_error_to_response(error, request_id))?;
+
+    for slot in &required_slots {
+        sqlx::query("INSERT INTO case_evidence (case_id, slot_name) VALUES ($1, $2)")
+            .bind(case_id)
+            .bind(slot)
+            .execute(&mut *tx)
+            .await
+            .map_err(|error| db_error_to_response(error, request_id))?;
+    }
+
+    tx.commit()
+        .await
+        .map_err(|error| db_error_to_response(error, request_id))?;
+
+    let response = CaseResponse {
+        case_id: case_id.to_string(),
+        case_type: "popia_incident".into(),
+        status,
+        created_at: created_at.to_rfc3339(),
+        blocked_reasons,
+    };
+
+    Ok((StatusCode::CREATED, Json(response)))
+}
+
+/// Allowed state transitions per case type, based on PRD §7 state machines.
+fn allowed_transitions(case_type: &str, from: &str) -> &'static [&'static str] {
+    match (case_type, from) {
+        // §7.1 Emergency Directive Pack
+        ("emergency_pack", "draft") => &["ready"],
+        ("emergency_pack", "ready") => &["link_issued"],
+        ("emergency_pack", "link_issued") => &["accessed", "revoked", "expired"],
+        // §7.2 MHCA 39 Case
+        ("mhca39", "blocked") => &["evidence_collecting"],
+        ("mhca39", "evidence_collecting") => &["draft_generated", "blocked"],
+        ("mhca39", "draft_generated") => &["awaiting_oath"],
+        ("mhca39", "awaiting_oath") => &["exported"],
+        ("mhca39", "exported") => &["closed"],
+        // §7.3 Death Readiness Pack (will_prep_sa, deceased_estate_reporting_sa)
+        ("will_prep_sa", "blocked") => &["ready"],
+        ("will_prep_sa", "ready") => &["exported"],
+        ("will_prep_sa", "exported") => &["accessed", "revoked"],
+        ("deceased_estate_reporting_sa", "blocked") => &["ready"],
+        ("deceased_estate_reporting_sa", "ready") => &["exported"],
+        ("deceased_estate_reporting_sa", "exported") => &["accessed", "revoked"],
+        // POPIA Incident
+        ("popia_incident", "draft") => &["ready"],
+        ("popia_incident", "ready") => &["exported"],
+        ("popia_incident", "exported") => &["closed"],
+        _ => {
+            tracing::debug!(
+                case_type = case_type,
+                from_status = from,
+                "no transitions defined for this case_type/status combination"
+            );
+            &[]
+        }
+    }
+}
+
+async fn transition_case(
+    State(state): State<AppState>,
+    ctx: RequestContext,
+    Extension(request_id): Extension<RequestId>,
+    Path(case_id): Path<String>,
+    Json(payload): Json<TransitionRequest>,
+) -> Result<Json<TransitionResponse>, axum::response::Response> {
+    let pool = match &state.pool {
+        Some(pool) => pool,
+        None => return Err(invalid_request(Some(request_id), "database unavailable")),
+    };
+    require_role(&ctx, &[Role::Principal, Role::Proxy])
+        .map_err(|error| error.into_response(Some(request_id)))?;
+    require_tier(&ctx, TierRequirement::Min(SensitivityTier::Amber))
+        .map_err(|error| error.into_response(Some(request_id)))?;
+    require_scope(&ctx, "write:limited").map_err(|error| error.into_response(Some(request_id)))?;
+
+    let case_id =
+        parse_uuid(&case_id).ok_or_else(|| invalid_request(Some(request_id), "invalid case_id"))?;
+    let principal_id = parse_uuid(&ctx.principal_id)
+        .ok_or_else(|| invalid_request(Some(request_id), "invalid principal_id"))?;
+
+    ensure_case_access(pool, case_id, principal_id, request_id).await?;
+
+    let row = sqlx::query("SELECT case_type::text, status::text FROM cases WHERE case_id = $1")
+        .bind(case_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|error| db_error_to_response(error, request_id))?;
+    let row = match row {
+        Some(row) => row,
+        None => return Err(not_found(Some(request_id), "case not found")),
+    };
+    let case_type: String = row
+        .try_get("case_type")
+        .map_err(|error| db_error_to_response(error, request_id))?;
+    let current_status: String = row
+        .try_get("status")
+        .map_err(|error| db_error_to_response(error, request_id))?;
+
+    let valid_targets = allowed_transitions(&case_type, &current_status);
+    if !valid_targets.contains(&payload.to_status.as_str()) {
+        return Err(conflict(
+            Some(request_id),
+            format!(
+                "transition from '{}' to '{}' not allowed for {}",
+                current_status, payload.to_status, case_type
+            ),
+        ));
+    }
+
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|error| db_error_to_response(error, request_id))?;
+
+    sqlx::query("UPDATE cases SET status = $1::case_status WHERE case_id = $2")
+        .bind(&payload.to_status)
+        .bind(case_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| db_error_to_response(error, request_id))?;
+
+    sqlx::query(
+        "INSERT INTO case_transitions (case_id, from_status, to_status, actor_principal_id, reason) \
+         VALUES ($1, $2, $3, $4, $5)",
+    )
+    .bind(case_id)
+    .bind(&current_status)
+    .bind(&payload.to_status)
+    .bind(principal_id)
+    .bind(&payload.reason)
+    .execute(&mut *tx)
+    .await
+    .map_err(|error| db_error_to_response(error, request_id))?;
+
+    tx.commit()
+        .await
+        .map_err(|error| db_error_to_response(error, request_id))?;
+
+    Ok(Json(TransitionResponse {
+        case_id: case_id.to_string(),
+        from_status: current_status,
+        to_status: payload.to_status,
+        transitioned_at: Utc::now().to_rfc3339(),
+    }))
+}
+
 async fn attach_evidence(
     State(state): State<AppState>,
     ctx: RequestContext,
@@ -607,6 +880,31 @@ async fn export_case(
     // Determine case type to fetch from the correct tables
     let case_type = fetch_case_type(pool, case_id, request_id).await?;
     let (evidence_table, slots_query, required_slots) = match case_type.as_str() {
+        "emergency_pack" => {
+            // Emergency pack uses directive_document_ids, not evidence slots.
+            // We treat each directive_document_id as a synthetic slot.
+            let row = sqlx::query(
+                "SELECT directive_document_ids FROM emergency_pack_cases WHERE case_id = $1",
+            )
+            .bind(case_id)
+            .fetch_optional(pool)
+            .await
+            .map_err(|error| db_error_to_response(error, request_id))?;
+            let doc_ids: Vec<uuid::Uuid> = match row {
+                Some(r) => r
+                    .try_get("directive_document_ids")
+                    .map_err(|error| db_error_to_response(error, request_id))?,
+                None => {
+                    return Err(not_found(
+                        Some(request_id),
+                        "emergency_pack case not found",
+                    ));
+                }
+            };
+            let slots: Vec<String> = doc_ids.iter().map(|id| id.to_string()).collect();
+            // Use empty table markers; we fetch documents directly below.
+            ("__emergency_pack__", "__emergency_pack__", slots)
+        }
         "mhca39" => {
             let row =
                 sqlx::query("SELECT required_evidence_slots FROM mhca39_cases WHERE case_id = $1")
@@ -659,6 +957,27 @@ async fn export_case(
             };
             ("case_evidence", "case_evidence", slots)
         }
+        "popia_incident" => {
+            let row = sqlx::query(
+                "SELECT required_evidence_slots FROM popia_incident_cases WHERE case_id = $1",
+            )
+            .bind(case_id)
+            .fetch_optional(pool)
+            .await
+            .map_err(|error| db_error_to_response(error, request_id))?;
+            let slots: Vec<String> = match row {
+                Some(r) => r
+                    .try_get("required_evidence_slots")
+                    .map_err(|error| db_error_to_response(error, request_id))?,
+                None => {
+                    return Err(not_found(
+                        Some(request_id),
+                        "popia_incident case not found",
+                    ));
+                }
+            };
+            ("case_evidence", "case_evidence", slots)
+        }
         _ => {
             return Err(invalid_request(
                 Some(request_id),
@@ -669,39 +988,6 @@ async fn export_case(
 
     // Safety: evidence_table and slots_query are compile-time string literals
     // selected by the exhaustive match above; they are never user-supplied.
-    let missing_query = format!(
-        "SELECT slot_name FROM {} WHERE case_id = $1 AND document_id IS NULL",
-        evidence_table
-    );
-    let missing_slots = sqlx::query(&missing_query)
-        .bind(case_id)
-        .fetch_all(pool)
-        .await
-        .map_err(|error| db_error_to_response(error, request_id))?;
-    if !missing_slots.is_empty() {
-        return Err(conflict(Some(request_id), "evidence slots incomplete"));
-    }
-
-    let evidence_join_query = format!(
-        "SELECT e.slot_name, e.document_id, d.document_type, d.title, v.sha256, v.blob_ref \
-         FROM {} e \
-         JOIN documents d ON d.document_id = e.document_id \
-         JOIN LATERAL ( \
-            SELECT sha256, blob_ref FROM document_versions \
-            WHERE document_id = e.document_id ORDER BY created_at DESC LIMIT 1 \
-         ) v ON true \
-         WHERE e.case_id = $1 ORDER BY e.slot_name",
-        slots_query
-    );
-    let rows = sqlx::query(&evidence_join_query)
-        .bind(case_id)
-        .fetch_all(pool)
-        .await
-        .map_err(|error| db_error_to_response(error, request_id))?;
-
-    if rows.len() != required_slots.len() {
-        return Err(conflict(Some(request_id), "evidence versions missing"));
-    }
 
     let export_dir = state
         .export_dir
@@ -712,44 +998,137 @@ async fn export_case(
         .map_err(|error| invalid_request(Some(request_id), error.to_string()))?;
 
     let mut manifest_documents = Vec::new();
-    for row in rows {
-        let document_id: uuid::Uuid = row
-            .try_get("document_id")
-            .map_err(|error| db_error_to_response(error, request_id))?;
-        let blob_ref: String = row
-            .try_get("blob_ref")
-            .map_err(|error| db_error_to_response(error, request_id))?;
-        let source_path = resolve_blob_ref(&blob_ref, &state.storage_dir)
-            .ok_or_else(|| invalid_request(Some(request_id), "invalid blob_ref"))?;
-        if !source_path.exists() {
-            return Err(not_found(Some(request_id), "document blob not found"));
+
+    if evidence_table == "__emergency_pack__" {
+        // Emergency pack: fetch documents directly from directive_document_ids
+        if required_slots.is_empty() {
+            return Err(conflict(Some(request_id), "no directive documents attached"));
         }
-        let dest_path = documents_dir.join(document_id.to_string());
-        fs::copy(&source_path, &dest_path)
-            .map_err(|error| invalid_request(Some(request_id), error.to_string()))?;
+        for (idx, doc_id_str) in required_slots.iter().enumerate() {
+            let document_id = parse_uuid(doc_id_str)
+                .ok_or_else(|| invalid_request(Some(request_id), "invalid document_id"))?;
+            let row = sqlx::query(
+                "SELECT d.document_id, d.document_type, d.title, v.sha256, v.blob_ref \
+                 FROM documents d \
+                 JOIN LATERAL ( \
+                    SELECT sha256, blob_ref FROM document_versions \
+                    WHERE document_id = d.document_id ORDER BY created_at DESC LIMIT 1 \
+                 ) v ON true \
+                 WHERE d.document_id = $1",
+            )
+            .bind(document_id)
+            .fetch_optional(pool)
+            .await
+            .map_err(|error| db_error_to_response(error, request_id))?;
+            let row = match row {
+                Some(r) => r,
+                None => return Err(not_found(Some(request_id), "directive document not found")),
+            };
+            let blob_ref: String = row
+                .try_get("blob_ref")
+                .map_err(|error| db_error_to_response(error, request_id))?;
+            let source_path = resolve_blob_ref(&blob_ref, &state.storage_dir)
+                .ok_or_else(|| invalid_request(Some(request_id), "invalid blob_ref"))?;
+            if !source_path.exists() {
+                return Err(not_found(Some(request_id), "document blob not found"));
+            }
+            let dest_path = documents_dir.join(document_id.to_string());
+            fs::copy(&source_path, &dest_path)
+                .map_err(|error| invalid_request(Some(request_id), error.to_string()))?;
 
-        let sha256: String = row
-            .try_get("sha256")
+            let sha256: String = row
+                .try_get("sha256")
+                .map_err(|error| db_error_to_response(error, request_id))?;
+            let document_type: String = row
+                .try_get("document_type")
+                .map_err(|error| db_error_to_response(error, request_id))?;
+            let title: String = row
+                .try_get("title")
+                .map_err(|error| db_error_to_response(error, request_id))?;
+            manifest_documents.push(ManifestDocument {
+                slot_name: format!("directive_{}", idx),
+                document_id: document_id.to_string(),
+                document_type,
+                title,
+                sha256,
+                bundle_path: format!("documents/{}", document_id),
+            });
+        }
+    } else {
+        // Evidence-slot based types (mhca39, will_prep_sa, deceased_estate, popia_incident)
+        let missing_query = format!(
+            "SELECT slot_name FROM {} WHERE case_id = $1 AND document_id IS NULL",
+            evidence_table
+        );
+        let missing_slots = sqlx::query(&missing_query)
+            .bind(case_id)
+            .fetch_all(pool)
+            .await
             .map_err(|error| db_error_to_response(error, request_id))?;
-        let slot_name: String = row
-            .try_get("slot_name")
-            .map_err(|error| db_error_to_response(error, request_id))?;
-        let document_type: String = row
-            .try_get("document_type")
-            .map_err(|error| db_error_to_response(error, request_id))?;
-        let title: String = row
-            .try_get("title")
-            .map_err(|error| db_error_to_response(error, request_id))?;
-        let bundle_path = format!("documents/{}", document_id);
+        if !missing_slots.is_empty() {
+            return Err(conflict(Some(request_id), "evidence slots incomplete"));
+        }
 
-        manifest_documents.push(ManifestDocument {
-            slot_name,
-            document_id: document_id.to_string(),
-            document_type,
-            title,
-            sha256,
-            bundle_path,
-        });
+        let evidence_join_query = format!(
+            "SELECT e.slot_name, e.document_id, d.document_type, d.title, v.sha256, v.blob_ref \
+             FROM {} e \
+             JOIN documents d ON d.document_id = e.document_id \
+             JOIN LATERAL ( \
+                SELECT sha256, blob_ref FROM document_versions \
+                WHERE document_id = e.document_id ORDER BY created_at DESC LIMIT 1 \
+             ) v ON true \
+             WHERE e.case_id = $1 ORDER BY e.slot_name",
+            slots_query
+        );
+        let rows = sqlx::query(&evidence_join_query)
+            .bind(case_id)
+            .fetch_all(pool)
+            .await
+            .map_err(|error| db_error_to_response(error, request_id))?;
+
+        if rows.len() != required_slots.len() {
+            return Err(conflict(Some(request_id), "evidence versions missing"));
+        }
+
+        for row in rows {
+            let document_id: uuid::Uuid = row
+                .try_get("document_id")
+                .map_err(|error| db_error_to_response(error, request_id))?;
+            let blob_ref: String = row
+                .try_get("blob_ref")
+                .map_err(|error| db_error_to_response(error, request_id))?;
+            let source_path = resolve_blob_ref(&blob_ref, &state.storage_dir)
+                .ok_or_else(|| invalid_request(Some(request_id), "invalid blob_ref"))?;
+            if !source_path.exists() {
+                return Err(not_found(Some(request_id), "document blob not found"));
+            }
+            let dest_path = documents_dir.join(document_id.to_string());
+            fs::copy(&source_path, &dest_path)
+                .map_err(|error| invalid_request(Some(request_id), error.to_string()))?;
+
+            let sha256: String = row
+                .try_get("sha256")
+                .map_err(|error| db_error_to_response(error, request_id))?;
+            let slot_name: String = row
+                .try_get("slot_name")
+                .map_err(|error| db_error_to_response(error, request_id))?;
+            let document_type: String = row
+                .try_get("document_type")
+                .map_err(|error| db_error_to_response(error, request_id))?;
+            let title: String = row
+                .try_get("title")
+                .map_err(|error| db_error_to_response(error, request_id))?;
+            let bundle_path = format!("documents/{}", document_id);
+
+            manifest_documents.push(ManifestDocument {
+                slot_name,
+                document_id: document_id.to_string(),
+                document_type,
+                title,
+                sha256,
+                bundle_path,
+            });
+        }
     }
 
     manifest_documents.sort_by(|a, b| a.slot_name.cmp(&b.slot_name));
@@ -773,6 +1152,20 @@ async fn export_case(
     let (template_filename, template_bytes, instructions_filename, instructions) = match case_type
         .as_str()
     {
+        "emergency_pack" => {
+            let template =
+                generate_emergency_pack_template(pool, case_id, &manifest_documents, request_id)
+                    .await?;
+            let t_bytes = serde_json::to_vec_pretty(&template)
+                .map_err(|error| invalid_request(Some(request_id), error.to_string()))?;
+            let instr = generate_emergency_pack_instructions(&template);
+            (
+                "emergency_pack.json".to_string(),
+                t_bytes,
+                "emergency_instructions.md".to_string(),
+                instr,
+            )
+        }
         "mhca39" => {
             let mhca39_template =
                 generate_mhca39_template(pool, case_id, &manifest_documents, request_id).await?;
@@ -811,6 +1204,20 @@ async fn export_case(
                 "deceased_estate_draft.json".to_string(),
                 t_bytes,
                 "instructions.md".to_string(),
+                instr,
+            )
+        }
+        "popia_incident" => {
+            let template =
+                generate_popia_incident_template(pool, case_id, &manifest_documents, request_id)
+                    .await?;
+            let t_bytes = serde_json::to_vec_pretty(&template)
+                .map_err(|error| invalid_request(Some(request_id), error.to_string()))?;
+            let instr = generate_popia_incident_instructions(&template);
+            (
+                "popia_notification_pack.json".to_string(),
+                t_bytes,
+                "popia_instructions.md".to_string(),
                 instr,
             )
         }
@@ -869,9 +1276,11 @@ async fn export_case(
         .map_err(|error| invalid_request(Some(request_id), error.to_string()))?;
 
     let artifact_kind = match case_type.as_str() {
+        "emergency_pack" => "emergency_pack_export",
         "mhca39" => "mhca39_export",
         "will_prep_sa" => "will_prep_export",
         "deceased_estate_reporting_sa" => "deceased_estate_export",
+        "popia_incident" => "popia_notification_export",
         _ => "case_export",
     };
 
@@ -1049,7 +1458,7 @@ fn generate_mhca39_instructions(template: &Mhca39Template) -> String {
             item.slot_name, required, attached, doc
         ));
     }
-    md.push_str("\n");
+    md.push('\n');
 
     md.push_str("## Next Steps\n\n");
     md.push_str("1. Review all documents in the `documents/` folder\n");
@@ -1336,6 +1745,280 @@ fn generate_deceased_estate_instructions(estimated_value: Option<f64>) -> String
     md
 }
 
+/// Emergency pack template output structure
+#[derive(Debug, Serialize, Deserialize)]
+struct EmergencyPackTemplate {
+    /// Case identifier
+    case_id: String,
+    /// Export timestamp
+    exported_at: String,
+    /// Directive document references
+    directive_documents: Vec<ManifestDocument>,
+    /// Emergency contacts
+    emergency_contacts: Vec<serde_json::Value>,
+    /// Disclaimer
+    disclaimer: String,
+}
+
+async fn generate_emergency_pack_template(
+    pool: &PgPool,
+    case_id: uuid::Uuid,
+    manifest_documents: &[ManifestDocument],
+    request_id: RequestId,
+) -> Result<EmergencyPackTemplate, axum::response::Response> {
+    let case_row = sqlx::query(
+        "SELECT emergency_contacts FROM emergency_pack_cases WHERE case_id = $1",
+    )
+    .bind(case_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|error| db_error_to_response(error, request_id))?;
+
+    let case_row = match case_row {
+        Some(row) => row,
+        None => return Err(not_found(Some(request_id), "emergency_pack case not found")),
+    };
+
+    let contacts: serde_json::Value = case_row
+        .try_get("emergency_contacts")
+        .map_err(|error| db_error_to_response(error, request_id))?;
+    let contacts_vec = match contacts {
+        serde_json::Value::Array(arr) => arr,
+        _ => Vec::new(),
+    };
+
+    Ok(EmergencyPackTemplate {
+        case_id: case_id.to_string(),
+        exported_at: Utc::now().to_rfc3339(),
+        directive_documents: manifest_documents.to_vec(),
+        emergency_contacts: contacts_vec,
+        disclaimer: "DISCLAIMER: This emergency directive pack is generated by LifeReady SA \
+            for preparedness purposes only. It does NOT constitute medical advice or a \
+            legally binding advance directive unless properly witnessed and executed \
+            under South African law. LifeReady SA does not provide legal or medical advice."
+            .to_string(),
+    })
+}
+
+fn generate_emergency_pack_instructions(template: &EmergencyPackTemplate) -> String {
+    let mut md = String::new();
+    md.push_str("# Emergency Directive Pack Instructions\n\n");
+    md.push_str("## Overview\n\n");
+    md.push_str("This export pack contains your advance directive documents and ");
+    md.push_str("emergency contact information for rapid access.\n\n");
+    md.push_str(&format!("**Case ID:** `{}`\n\n", template.case_id));
+    md.push_str(&format!("**Exported:** {}\n\n", template.exported_at));
+
+    md.push_str("## Disclaimer\n\n> ");
+    md.push_str(&template.disclaimer);
+    md.push_str("\n\n");
+
+    md.push_str("## Documents Included\n\n");
+    for doc in &template.directive_documents {
+        md.push_str(&format!("- **{}**: {} ({})\n", doc.slot_name, doc.title, doc.document_type));
+    }
+    md.push('\n');
+
+    md.push_str("## Emergency Contacts\n\n");
+    for contact in &template.emergency_contacts {
+        let name = contact.get("name").and_then(|v| v.as_str()).unwrap_or("Unknown");
+        let phone = contact.get("phone_e164").and_then(|v| v.as_str()).unwrap_or("-");
+        md.push_str(&format!("- **{}**: {}\n", name, phone));
+    }
+    md.push('\n');
+
+    md.push_str("## Sharing\n\n");
+    md.push_str("Share this pack via a time-limited link. All accesses are logged.\n");
+    md.push_str("Revoke the link at any time to immediately invalidate access.\n\n");
+
+    md.push_str("## Verification\n\n");
+    md.push_str("Use the `audit-verifier` CLI tool to verify the integrity of this bundle:\n\n");
+    md.push_str("```bash\naudit-verifier verify-bundle --bundle <path-to-export>\n```\n");
+
+    md
+}
+
+/// POPIA incident notification template output structure
+#[derive(Debug, Serialize, Deserialize)]
+struct PopiaIncidentTemplate {
+    /// Case identifier
+    case_id: String,
+    /// Export timestamp
+    exported_at: String,
+    /// Incident title
+    incident_title: String,
+    /// Incident description
+    description: Option<String>,
+    /// Affected data classes (e.g., health, financial, identity)
+    affected_data_classes: Vec<String>,
+    /// Estimated number of affected users
+    affected_user_count: Option<i32>,
+    /// Mitigation steps taken
+    mitigation_steps: Option<String>,
+    /// When the incident was reported internally
+    reported_at: String,
+    /// Evidence checklist
+    evidence_checklist: Vec<EvidenceChecklistItem>,
+    /// Disclaimer
+    disclaimer: String,
+}
+
+async fn generate_popia_incident_template(
+    pool: &PgPool,
+    case_id: uuid::Uuid,
+    _manifest_documents: &[ManifestDocument],
+    request_id: RequestId,
+) -> Result<PopiaIncidentTemplate, axum::response::Response> {
+    let case_row = sqlx::query(
+        "SELECT p.incident_title, p.description, p.affected_data_classes, \
+         p.affected_user_count, p.mitigation_steps, p.reported_at, \
+         p.required_evidence_slots, p.notes \
+         FROM popia_incident_cases p WHERE p.case_id = $1",
+    )
+    .bind(case_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|error| db_error_to_response(error, request_id))?;
+
+    let case_row = match case_row {
+        Some(row) => row,
+        None => return Err(not_found(Some(request_id), "popia_incident case not found")),
+    };
+
+    let incident_title: String = case_row
+        .try_get("incident_title")
+        .map_err(|error| db_error_to_response(error, request_id))?;
+    let description: Option<String> = case_row
+        .try_get("description")
+        .map_err(|error| db_error_to_response(error, request_id))?;
+    let affected_data_classes: Vec<String> = case_row
+        .try_get("affected_data_classes")
+        .map_err(|error| db_error_to_response(error, request_id))?;
+    let affected_user_count: Option<i32> = case_row
+        .try_get("affected_user_count")
+        .map_err(|error| db_error_to_response(error, request_id))?;
+    let mitigation_steps: Option<String> = case_row
+        .try_get("mitigation_steps")
+        .map_err(|error| db_error_to_response(error, request_id))?;
+    let reported_at: chrono::DateTime<Utc> = case_row
+        .try_get("reported_at")
+        .map_err(|error| db_error_to_response(error, request_id))?;
+    let required_slots: Vec<String> = case_row
+        .try_get("required_evidence_slots")
+        .map_err(|error| db_error_to_response(error, request_id))?;
+
+    let evidence_rows = sqlx::query(
+        "SELECT e.slot_name, e.document_id, d.document_type, d.title \
+         FROM case_evidence e \
+         LEFT JOIN documents d ON d.document_id = e.document_id \
+         WHERE e.case_id = $1 \
+         ORDER BY e.slot_name",
+    )
+    .bind(case_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|error| db_error_to_response(error, request_id))?;
+
+    let mut checklist = Vec::new();
+    for row in evidence_rows {
+        let slot_name: String = row
+            .try_get("slot_name")
+            .map_err(|error| db_error_to_response(error, request_id))?;
+        let document_id: Option<uuid::Uuid> = row
+            .try_get("document_id")
+            .map_err(|error| db_error_to_response(error, request_id))?;
+        let document_type: Option<String> = row
+            .try_get("document_type")
+            .map_err(|error| db_error_to_response(error, request_id))?;
+        let title: Option<String> = row
+            .try_get("title")
+            .map_err(|error| db_error_to_response(error, request_id))?;
+
+        checklist.push(EvidenceChecklistItem {
+            slot_name: slot_name.clone(),
+            required: required_slots.contains(&slot_name),
+            attached: document_id.is_some(),
+            document_id: document_id.map(|id| id.to_string()),
+            document_type,
+            title,
+        });
+    }
+
+    Ok(PopiaIncidentTemplate {
+        case_id: case_id.to_string(),
+        exported_at: Utc::now().to_rfc3339(),
+        incident_title,
+        description,
+        affected_data_classes,
+        affected_user_count,
+        mitigation_steps,
+        reported_at: reported_at.to_rfc3339(),
+        evidence_checklist: checklist,
+        disclaimer: "DISCLAIMER: This POPIA security compromise notification pack is generated \
+            by LifeReady SA. It is intended to support compliance with Section 22 of the \
+            Protection of Personal Information Act (POPIA). This does NOT constitute legal \
+            advice. Consult a qualified legal professional for regulatory submissions. \
+            LifeReady SA does not provide legal advice."
+            .to_string(),
+    })
+}
+
+fn generate_popia_incident_instructions(template: &PopiaIncidentTemplate) -> String {
+    let mut md = String::new();
+    md.push_str("# POPIA Security Compromise Notification Pack\n\n");
+    md.push_str("## Overview\n\n");
+    md.push_str("This export pack supports POPIA Section 22 notification obligations.\n\n");
+    md.push_str(&format!("**Case ID:** `{}`\n\n", template.case_id));
+    md.push_str(&format!("**Incident:** {}\n\n", template.incident_title));
+    md.push_str(&format!("**Reported:** {}\n\n", template.reported_at));
+    md.push_str(&format!("**Exported:** {}\n\n", template.exported_at));
+
+    md.push_str("## Disclaimer\n\n> ");
+    md.push_str(&template.disclaimer);
+    md.push_str("\n\n");
+
+    md.push_str("## Incident Details\n\n");
+    if let Some(desc) = &template.description {
+        md.push_str(&format!("**Description:** {}\n\n", desc));
+    }
+    md.push_str(&format!(
+        "**Affected Data Classes:** {}\n\n",
+        template.affected_data_classes.join(", ")
+    ));
+    if let Some(count) = template.affected_user_count {
+        md.push_str(&format!("**Estimated Affected Users:** {}\n\n", count));
+    }
+    if let Some(steps) = &template.mitigation_steps {
+        md.push_str(&format!("**Mitigation Steps:** {}\n\n", steps));
+    }
+
+    md.push_str("## Required Actions (POPIA Section 22)\n\n");
+    md.push_str("1. Notify the Information Regulator as soon as reasonably possible\n");
+    md.push_str("2. Notify affected data subjects if the compromise may cause harm\n");
+    md.push_str("3. Document all steps taken to address the compromise\n");
+    md.push_str("4. Retain this pack and audit trail for compliance evidence\n\n");
+
+    md.push_str("## Evidence Checklist\n\n");
+    md.push_str("| Slot | Required | Attached | Document |\n");
+    md.push_str("|------|----------|----------|----------|\n");
+    for item in &template.evidence_checklist {
+        let required = if item.required { "✓" } else { "-" };
+        let attached = if item.attached { "✓" } else { "✗" };
+        let doc = item.title.as_deref().unwrap_or("-");
+        md.push_str(&format!(
+            "| {} | {} | {} | {} |\n",
+            item.slot_name, required, attached, doc
+        ));
+    }
+    md.push('\n');
+
+    md.push_str("## Verification\n\n");
+    md.push_str("Use the `audit-verifier` CLI tool to verify the integrity of this bundle:\n\n");
+    md.push_str("```bash\naudit-verifier verify-bundle --bundle <path-to-export>\n```\n");
+
+    md
+}
+
 pub fn addr_from_env(default_port: u16) -> SocketAddr {
     let host = std::env::var("HOST").unwrap_or_else(|_| "0.0.0.0".into());
     let port = std::env::var("CASE_PORT")
@@ -1431,7 +2114,17 @@ fn default_deceased_estate_slots() -> Vec<String> {
     ]
 }
 
-fn resolve_blob_ref(blob_ref: &str, storage_dir: &PathBuf) -> Option<PathBuf> {
+fn default_popia_incident_slots() -> Vec<String> {
+    vec![
+        "incident_report".into(),
+        "affected_data_summary".into(),
+        "mitigation_evidence".into(),
+        "regulator_notification_draft".into(),
+        "data_subject_notification_draft".into(),
+    ]
+}
+
+fn resolve_blob_ref(blob_ref: &str, storage_dir: &std::path::Path) -> Option<PathBuf> {
     let resolved = if let Some(path) = blob_ref.strip_prefix("file://") {
         PathBuf::from(path)
     } else if blob_ref.starts_with('/') {
@@ -1443,15 +2136,13 @@ fn resolve_blob_ref(blob_ref: &str, storage_dir: &PathBuf) -> Option<PathBuf> {
     // Prevent path traversal: resolved path must be within storage_dir.
     if let (Ok(canonical_storage), Ok(canonical_resolved)) =
         (storage_dir.canonicalize(), resolved.canonicalize())
-    {
-        if !canonical_resolved.starts_with(&canonical_storage) {
+        && !canonical_resolved.starts_with(&canonical_storage) {
             tracing::warn!(
                 blob_ref = blob_ref,
                 "resolve_blob_ref rejected: path escapes storage directory"
             );
             return None;
         }
-    }
 
     Some(resolved)
 }
@@ -1462,7 +2153,7 @@ fn sha256_bytes(bytes: &[u8]) -> String {
     hex::encode(hasher.finalize())
 }
 
-fn sha256_file(path: &PathBuf) -> Result<String, std::io::Error> {
+fn sha256_file(path: &std::path::Path) -> Result<String, std::io::Error> {
     let bytes = fs::read(path)?;
     Ok(sha256_bytes(&bytes))
 }
@@ -1482,7 +2173,7 @@ fn create_zip(
         let path = entry.path();
         let relative = path
             .strip_prefix(source_dir)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+            .map_err(std::io::Error::other)?;
 
         if relative.as_os_str().is_empty() {
             continue;
@@ -1491,17 +2182,17 @@ fn create_zip(
         let name = relative.to_string_lossy().replace('\\', "/");
         if path.is_dir() {
             zip.add_directory(&name, options)
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+                .map_err(std::io::Error::other)?;
         } else {
             zip.start_file(&name, options)
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+                .map_err(std::io::Error::other)?;
             let data = fs::read(path)?;
             zip.write_all(&data)?;
         }
     }
 
     zip.finish()
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        .map_err(std::io::Error::other)?;
     Ok(())
 }
 
@@ -1658,6 +2349,7 @@ fn db_error_to_response(error: sqlx::Error, request_id: RequestId) -> axum::resp
 }
 
 #[cfg(test)]
+#[allow(clippy::await_holding_lock)]
 mod tests {
     use super::*;
     use axum::{
@@ -2928,5 +3620,354 @@ mod tests {
             },
         )
         .await;
+    }
+
+    // === Phase 3: State machine transition tests ===
+
+    #[test]
+    fn allowed_transitions_emergency_pack_draft_to_ready() {
+        let transitions = allowed_transitions("emergency_pack", "draft");
+        assert_eq!(transitions, &["ready"]);
+    }
+
+    #[test]
+    fn allowed_transitions_emergency_pack_ready_to_link_issued() {
+        let transitions = allowed_transitions("emergency_pack", "ready");
+        assert_eq!(transitions, &["link_issued"]);
+    }
+
+    #[test]
+    fn allowed_transitions_emergency_pack_link_issued() {
+        let transitions = allowed_transitions("emergency_pack", "link_issued");
+        assert!(transitions.contains(&"accessed"));
+        assert!(transitions.contains(&"revoked"));
+        assert!(transitions.contains(&"expired"));
+        assert_eq!(transitions.len(), 3);
+    }
+
+    #[test]
+    fn allowed_transitions_mhca39_full_workflow() {
+        assert_eq!(allowed_transitions("mhca39", "blocked"), &["evidence_collecting"]);
+        assert!(allowed_transitions("mhca39", "evidence_collecting").contains(&"draft_generated"));
+        assert!(allowed_transitions("mhca39", "evidence_collecting").contains(&"blocked"));
+        assert_eq!(allowed_transitions("mhca39", "draft_generated"), &["awaiting_oath"]);
+        assert_eq!(allowed_transitions("mhca39", "awaiting_oath"), &["exported"]);
+        assert_eq!(allowed_transitions("mhca39", "exported"), &["closed"]);
+    }
+
+    #[test]
+    fn allowed_transitions_will_prep_workflow() {
+        assert_eq!(allowed_transitions("will_prep_sa", "blocked"), &["ready"]);
+        assert_eq!(allowed_transitions("will_prep_sa", "ready"), &["exported"]);
+        assert!(allowed_transitions("will_prep_sa", "exported").contains(&"accessed"));
+        assert!(allowed_transitions("will_prep_sa", "exported").contains(&"revoked"));
+    }
+
+    #[test]
+    fn allowed_transitions_deceased_estate_workflow() {
+        assert_eq!(allowed_transitions("deceased_estate_reporting_sa", "blocked"), &["ready"]);
+        assert_eq!(allowed_transitions("deceased_estate_reporting_sa", "ready"), &["exported"]);
+        assert!(allowed_transitions("deceased_estate_reporting_sa", "exported").contains(&"accessed"));
+        assert!(allowed_transitions("deceased_estate_reporting_sa", "exported").contains(&"revoked"));
+    }
+
+    #[test]
+    fn allowed_transitions_popia_incident_workflow() {
+        assert_eq!(allowed_transitions("popia_incident", "draft"), &["ready"]);
+        assert_eq!(allowed_transitions("popia_incident", "ready"), &["exported"]);
+        assert_eq!(allowed_transitions("popia_incident", "exported"), &["closed"]);
+    }
+
+    #[test]
+    fn allowed_transitions_invalid_returns_empty() {
+        assert!(allowed_transitions("unknown_type", "draft").is_empty());
+        assert!(allowed_transitions("mhca39", "closed").is_empty());
+        assert!(allowed_transitions("emergency_pack", "exported").is_empty());
+    }
+
+    // === POPIA incident tests ===
+
+    #[test]
+    fn default_popia_incident_slots_contains_expected_items() {
+        let slots = default_popia_incident_slots();
+        assert!(slots.contains(&"incident_report".to_string()));
+        assert!(slots.contains(&"regulator_notification_draft".to_string()));
+        assert!(slots.contains(&"data_subject_notification_draft".to_string()));
+        assert_eq!(slots.len(), 5);
+    }
+
+    #[tokio::test]
+    async fn create_popia_incident_rejects_insufficient_role() {
+        with_env_async(
+            &[
+                ("LIFEREADY_ENV", Some("dev")),
+                ("JWT_SECRET", Some("test-secret-32-chars-minimum!!")),
+                (
+                    "DATABASE_URL",
+                    Some("postgres://postgres:postgres@127.0.0.1:5432/lifeready"),
+                ),
+            ],
+            || async {
+                let app = router();
+                let body = serde_json::json!({
+                    "incident_title": "Test Incident",
+                    "affected_data_classes": ["health"]
+                })
+                .to_string();
+                let response = axum::Router::into_service(app)
+                    .oneshot(
+                        Request::builder()
+                            .method("POST")
+                            .uri("/v1/cases/popia-incident")
+                            .header("content-type", "application/json")
+                            .header(
+                                "authorization",
+                                format!(
+                                    "Bearer {}",
+                                    auth_token_with(
+                                        Role::EmergencyContact,
+                                        vec![SensitivityTier::Amber],
+                                        AccessLevel::LimitedWrite,
+                                    )
+                                ),
+                            )
+                            .body(Body::from(body))
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+
+                assert_eq!(response.status(), StatusCode::FORBIDDEN);
+            },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn create_popia_incident_rejects_insufficient_tier() {
+        with_env_async(
+            &[
+                ("LIFEREADY_ENV", Some("dev")),
+                ("JWT_SECRET", Some("test-secret-32-chars-minimum!!")),
+                (
+                    "DATABASE_URL",
+                    Some("postgres://postgres:postgres@127.0.0.1:5432/lifeready"),
+                ),
+            ],
+            || async {
+                let app = router();
+                let body = serde_json::json!({
+                    "incident_title": "Test Incident",
+                    "affected_data_classes": ["health"]
+                })
+                .to_string();
+                let response = axum::Router::into_service(app)
+                    .oneshot(
+                        Request::builder()
+                            .method("POST")
+                            .uri("/v1/cases/popia-incident")
+                            .header("content-type", "application/json")
+                            .header(
+                                "authorization",
+                                format!(
+                                    "Bearer {}",
+                                    auth_token_with(
+                                        Role::Principal,
+                                        vec![SensitivityTier::Green],
+                                        AccessLevel::LimitedWrite,
+                                    )
+                                ),
+                            )
+                            .body(Body::from(body))
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+
+                assert_eq!(response.status(), StatusCode::FORBIDDEN);
+            },
+        )
+        .await;
+    }
+
+    // === State transition endpoint tests ===
+
+    #[tokio::test]
+    async fn transition_case_rejects_invalid_case_id() {
+        with_env_async(
+            &[
+                ("LIFEREADY_ENV", Some("dev")),
+                ("JWT_SECRET", Some("test-secret-32-chars-minimum!!")),
+                (
+                    "DATABASE_URL",
+                    Some("postgres://postgres:postgres@127.0.0.1:5432/lifeready"),
+                ),
+            ],
+            || async {
+                let app = router();
+                let body = serde_json::json!({
+                    "to_status": "ready"
+                })
+                .to_string();
+                let response = axum::Router::into_service(app)
+                    .oneshot(
+                        Request::builder()
+                            .method("POST")
+                            .uri("/v1/cases/not-a-uuid/transition")
+                            .header("content-type", "application/json")
+                            .header(
+                                "authorization",
+                                format!("Bearer {}", auth_token(AccessLevel::LimitedWrite)),
+                            )
+                            .body(Body::from(body))
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+
+                assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+            },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn transition_case_rejects_insufficient_role() {
+        with_env_async(
+            &[
+                ("LIFEREADY_ENV", Some("dev")),
+                ("JWT_SECRET", Some("test-secret-32-chars-minimum!!")),
+                (
+                    "DATABASE_URL",
+                    Some("postgres://postgres:postgres@127.0.0.1:5432/lifeready"),
+                ),
+            ],
+            || async {
+                let app = router();
+                let body = serde_json::json!({
+                    "to_status": "ready"
+                })
+                .to_string();
+                let response = axum::Router::into_service(app)
+                    .oneshot(
+                        Request::builder()
+                            .method("POST")
+                            .uri("/v1/cases/00000000-0000-0000-0000-000000000002/transition")
+                            .header("content-type", "application/json")
+                            .header(
+                                "authorization",
+                                format!(
+                                    "Bearer {}",
+                                    auth_token_with(
+                                        Role::EmergencyContact,
+                                        vec![SensitivityTier::Amber],
+                                        AccessLevel::LimitedWrite,
+                                    )
+                                ),
+                            )
+                            .body(Body::from(body))
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+
+                assert_eq!(response.status(), StatusCode::FORBIDDEN);
+            },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn transition_case_rejects_invalid_principal_id() {
+        with_env_async(
+            &[
+                ("LIFEREADY_ENV", Some("dev")),
+                ("JWT_SECRET", Some("test-secret-32-chars-minimum!!")),
+                (
+                    "DATABASE_URL",
+                    Some("postgres://postgres:postgres@127.0.0.1:5432/lifeready"),
+                ),
+            ],
+            || async {
+                let app = router();
+                let body = serde_json::json!({
+                    "to_status": "ready"
+                })
+                .to_string();
+                let response = axum::Router::into_service(app)
+                    .oneshot(
+                        Request::builder()
+                            .method("POST")
+                            .uri("/v1/cases/00000000-0000-0000-0000-000000000002/transition")
+                            .header("content-type", "application/json")
+                            .header(
+                                "authorization",
+                                format!(
+                                    "Bearer {}",
+                                    auth_token_for_principal(
+                                        "not-a-uuid",
+                                        Role::Principal,
+                                        vec![SensitivityTier::Amber],
+                                        AccessLevel::LimitedWrite,
+                                    )
+                                ),
+                            )
+                            .body(Body::from(body))
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+
+                assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+            },
+        )
+        .await;
+    }
+
+    // === Emergency pack template tests ===
+
+    #[test]
+    fn generate_emergency_pack_instructions_includes_contacts() {
+        let template = EmergencyPackTemplate {
+            case_id: Uuid::new_v4().to_string(),
+            exported_at: Utc::now().to_rfc3339(),
+            directive_documents: vec![],
+            emergency_contacts: vec![serde_json::json!({
+                "name": "Jane Doe",
+                "phone_e164": "+27821234567"
+            })],
+            disclaimer: "Test disclaimer".into(),
+        };
+        let instructions = generate_emergency_pack_instructions(&template);
+        assert!(instructions.contains("Emergency Directive Pack Instructions"));
+        assert!(instructions.contains("Jane Doe"));
+        assert!(instructions.contains("+27821234567"));
+        assert!(instructions.contains("audit-verifier"));
+    }
+
+    // === POPIA incident template tests ===
+
+    #[test]
+    fn generate_popia_incident_instructions_includes_section22() {
+        let template = PopiaIncidentTemplate {
+            case_id: Uuid::new_v4().to_string(),
+            exported_at: Utc::now().to_rfc3339(),
+            incident_title: "Data Breach Q3".into(),
+            description: Some("Unauthorized access to records".into()),
+            affected_data_classes: vec!["health".into(), "identity".into()],
+            affected_user_count: Some(42),
+            mitigation_steps: Some("Revoked access tokens".into()),
+            reported_at: Utc::now().to_rfc3339(),
+            evidence_checklist: vec![],
+            disclaimer: "Test disclaimer".into(),
+        };
+        let instructions = generate_popia_incident_instructions(&template);
+        assert!(instructions.contains("POPIA Security Compromise"));
+        assert!(instructions.contains("Section 22"));
+        assert!(instructions.contains("Data Breach Q3"));
+        assert!(instructions.contains("health, identity"));
+        assert!(instructions.contains("42"));
+        assert!(instructions.contains("Revoked access tokens"));
+        assert!(instructions.contains("Information Regulator"));
     }
 }

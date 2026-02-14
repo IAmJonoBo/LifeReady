@@ -1,3 +1,6 @@
+// Axum handlers return Result<T, Response>; the Response type is large by design.
+#![allow(clippy::result_large_err)]
+
 use async_trait::async_trait;
 use axum::{
     body::Body,
@@ -352,10 +355,10 @@ async fn commit_document(
 
     let version_id: uuid::Uuid = row
         .try_get("version_id")
-        .map_err(|error| db_error_to_response(error.into(), request_id))?;
+        .map_err(|error| db_error_to_response(error, request_id))?;
     let created_at: chrono::DateTime<Utc> = row
         .try_get("created_at")
-        .map_err(|error| db_error_to_response(error.into(), request_id))?;
+        .map_err(|error| db_error_to_response(error, request_id))?;
 
     let response = DocumentVersionResponse {
         document_id: document_id.to_string(),
@@ -413,13 +416,13 @@ async fn list_versions(
     for row in rows {
         let version_id: uuid::Uuid = row
             .try_get("version_id")
-            .map_err(|error| db_error_to_response(error.into(), request_id))?;
+            .map_err(|error| db_error_to_response(error, request_id))?;
         let sha256: String = row
             .try_get("sha256")
-            .map_err(|error| db_error_to_response(error.into(), request_id))?;
+            .map_err(|error| db_error_to_response(error, request_id))?;
         let created_at: chrono::DateTime<Utc> = row
             .try_get("created_at")
-            .map_err(|error| db_error_to_response(error.into(), request_id))?;
+            .map_err(|error| db_error_to_response(error, request_id))?;
 
         items.push(DocumentVersionResponse {
             document_id: document_id_str.clone(),
@@ -470,10 +473,10 @@ async fn get_document(
 
     let created_at: chrono::DateTime<Utc> = row
         .try_get("created_at")
-        .map_err(|error| db_error_to_response(error.into(), request_id))?;
+        .map_err(|error| db_error_to_response(error, request_id))?;
     let sensitivity = tier_from_db(
         row.try_get::<String, _>("sensitivity")
-            .map_err(|error| db_error_to_response(error.into(), request_id))?,
+            .map_err(|error| db_error_to_response(error, request_id))?,
     )
     .ok_or_else(|| invalid_request(Some(request_id), "invalid sensitivity"))?;
 
@@ -482,18 +485,18 @@ async fn get_document(
     Ok(Json(DocumentResponse {
         document_id: row
             .try_get::<uuid::Uuid, _>("document_id")
-            .map_err(|error| db_error_to_response(error.into(), request_id))?
+            .map_err(|error| db_error_to_response(error, request_id))?
             .to_string(),
         document_type: row
             .try_get::<String, _>("document_type")
-            .map_err(|error| db_error_to_response(error.into(), request_id))?,
+            .map_err(|error| db_error_to_response(error, request_id))?,
         title: row
             .try_get::<String, _>("title")
-            .map_err(|error| db_error_to_response(error.into(), request_id))?,
+            .map_err(|error| db_error_to_response(error, request_id))?,
         sensitivity,
         tags: row
             .try_get::<Vec<String>, _>("tags")
-            .map_err(|error| db_error_to_response(error.into(), request_id))?,
+            .map_err(|error| db_error_to_response(error, request_id))?,
         created_at: created_at.to_rfc3339(),
     }))
 }
@@ -543,7 +546,7 @@ async fn download_document(
     let sensitivity = tier_from_db(
         doc_row
             .try_get::<String, _>("sensitivity")
-            .map_err(|error| db_error_to_response(error.into(), request_id))?,
+            .map_err(|error| db_error_to_response(error, request_id))?,
     )
     .ok_or_else(|| invalid_request(Some(request_id), "invalid sensitivity"))?;
 
@@ -551,7 +554,7 @@ async fn download_document(
 
     let title: String = doc_row
         .try_get("title")
-        .map_err(|error| db_error_to_response(error.into(), request_id))?;
+        .map_err(|error| db_error_to_response(error, request_id))?;
 
     // Get version - either specified or latest
     let version_row = if let Some(version_id_str) = &query.version_id {
@@ -584,13 +587,13 @@ async fn download_document(
 
     let blob_ref: String = version_row
         .try_get("blob_ref")
-        .map_err(|error| db_error_to_response(error.into(), request_id))?;
+        .map_err(|error| db_error_to_response(error, request_id))?;
     let expected_sha256: String = version_row
         .try_get("sha256")
-        .map_err(|error| db_error_to_response(error.into(), request_id))?;
+        .map_err(|error| db_error_to_response(error, request_id))?;
     let mime_type: String = version_row
         .try_get("mime_type")
-        .map_err(|error| db_error_to_response(error.into(), request_id))?;
+        .map_err(|error| db_error_to_response(error, request_id))?;
 
     // Read document content via storage adapter
     let bytes = state
@@ -681,10 +684,10 @@ async fn list_documents(
     for row in rows {
         let created_at: chrono::DateTime<Utc> = row
             .try_get("created_at")
-            .map_err(|error| db_error_to_response(error.into(), request_id))?;
+            .map_err(|error| db_error_to_response(error, request_id))?;
         let sensitivity = tier_from_db(
             row.try_get::<String, _>("sensitivity")
-                .map_err(|error| db_error_to_response(error.into(), request_id))?,
+                .map_err(|error| db_error_to_response(error, request_id))?,
         )
         .ok_or_else(|| invalid_request(Some(request_id), "invalid sensitivity"))?;
 
@@ -695,18 +698,18 @@ async fn list_documents(
         items.push(DocumentResponse {
             document_id: row
                 .try_get::<uuid::Uuid, _>("document_id")
-                .map_err(|error| db_error_to_response(error.into(), request_id))?
+                .map_err(|error| db_error_to_response(error, request_id))?
                 .to_string(),
             document_type: row
                 .try_get::<String, _>("document_type")
-                .map_err(|error| db_error_to_response(error.into(), request_id))?,
+                .map_err(|error| db_error_to_response(error, request_id))?,
             title: row
                 .try_get::<String, _>("title")
-                .map_err(|error| db_error_to_response(error.into(), request_id))?,
+                .map_err(|error| db_error_to_response(error, request_id))?,
             sensitivity,
             tags: row
                 .try_get::<Vec<String>, _>("tags")
-                .map_err(|error| db_error_to_response(error.into(), request_id))?,
+                .map_err(|error| db_error_to_response(error, request_id))?,
             created_at: created_at.to_rfc3339(),
         });
     }
@@ -821,7 +824,7 @@ fn db_error_to_response(error: sqlx::Error, request_id: RequestId) -> axum::resp
 
 fn normalize_blob_ref(
     blob_ref: &str,
-    storage_dir: &PathBuf,
+    storage_dir: &std::path::Path,
     document_id: uuid::Uuid,
     request_id: RequestId,
 ) -> Result<String, axum::response::Response> {
@@ -845,8 +848,7 @@ fn normalize_blob_ref(
     // Prevent path traversal: resolved path must be within storage_dir.
     if let (Ok(canonical_storage), Ok(canonical_resolved)) =
         (storage_dir.canonicalize(), resolved.canonicalize())
-    {
-        if !canonical_resolved.starts_with(&canonical_storage) {
+        && !canonical_resolved.starts_with(&canonical_storage) {
             tracing::warn!(
                 blob_ref = blob_ref,
                 "normalize_blob_ref rejected: path escapes storage directory"
@@ -856,12 +858,12 @@ fn normalize_blob_ref(
                 "blob_ref outside storage directory",
             ));
         }
-    }
 
     Ok(candidate)
 }
 
 #[cfg(test)]
+#[allow(clippy::await_holding_lock)]
 mod tests {
     use super::*;
     use axum::{
