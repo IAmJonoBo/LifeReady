@@ -839,7 +839,7 @@ async fn update_case(
     .bind(revision_number as i32)
     .bind(&payload.summary)
     .bind(&payload.mitigation_steps)
-    .bind(&payload.affected_data_classes.as_deref().unwrap_or_default())
+    .bind(payload.affected_data_classes.as_deref().unwrap_or_default())
     .bind(payload.affected_user_count)
     .bind(&payload.notes)
     .bind(principal_id)
@@ -2554,7 +2554,7 @@ fn generate_death_readiness_instructions(template: &DeathReadinessTemplate) -> S
         for doc in &template.asset_documents {
             md.push_str(&format!("- {} ({}): `{}`\n", doc.title, doc.document_type, doc.document_id));
         }
-        md.push_str("\n");
+        md.push('\n');
     }
     md.push_str("## Contacts\n\n");
     if template.contact_documents.is_empty() {
@@ -2563,7 +2563,7 @@ fn generate_death_readiness_instructions(template: &DeathReadinessTemplate) -> S
         for doc in &template.contact_documents {
             md.push_str(&format!("- {} ({}): `{}`\n", doc.title, doc.document_type, doc.document_id));
         }
-        md.push_str("\n");
+        md.push('\n');
     }
     md.push_str("## No Credential Release\n\n");
     md.push_str("v0.1 does not release any high-risk secrets or credentials.\n\n");

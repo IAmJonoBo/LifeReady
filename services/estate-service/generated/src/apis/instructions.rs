@@ -13,60 +13,95 @@ use crate::{models, types::*};
 #[allow(clippy::large_enum_variant)]
 pub enum V1InstructionsPostResponse {
     /// Created
-    Status201_Created {
+    Status201_Created
+    {
         body: models::Instruction,
-        x_request_id: Option<uuid::Uuid>,
-    },
+        x_request_id:
+        Option<
+        uuid::Uuid
+        >
+    }
+    ,
     /// Error response
-    Status400_ErrorResponse {
+    Status400_ErrorResponse
+    {
         body: models::V1PeopleGet400Response,
-        x_request_id: Option<uuid::Uuid>,
-    },
+        x_request_id:
+        Option<
+        uuid::Uuid
+        >
+    }
+    ,
     /// Unauthorized
-    Status401_Unauthorized {
+    Status401_Unauthorized
+    {
         body: models::V1PeopleGet400Response,
-        x_request_id: Option<uuid::Uuid>,
-    },
+        x_request_id:
+        Option<
+        uuid::Uuid
+        >
+    }
+    ,
     /// Forbidden
-    Status403_Forbidden {
+    Status403_Forbidden
+    {
         body: models::V1PeopleGet400Response,
-        x_request_id: Option<uuid::Uuid>,
-    },
+        x_request_id:
+        Option<
+        uuid::Uuid
+        >
+    }
+    ,
     /// Conflict
-    Status409_Conflict {
+    Status409_Conflict
+    {
         body: models::V1PeopleGet400Response,
-        x_request_id: Option<uuid::Uuid>,
-    },
+        x_request_id:
+        Option<
+        uuid::Uuid
+        >
+    }
+    ,
     /// Unprocessable Entity
-    Status422_UnprocessableEntity {
+    Status422_UnprocessableEntity
+    {
         body: models::V1PeopleGet400Response,
-        x_request_id: Option<uuid::Uuid>,
-    },
+        x_request_id:
+        Option<
+        uuid::Uuid
+        >
+    }
+    ,
     /// Internal Server Error
-    Status500_InternalServerError {
+    Status500_InternalServerError
+    {
         body: models::V1PeopleGet400Response,
-        x_request_id: Option<uuid::Uuid>,
-    },
+        x_request_id:
+        Option<
+        uuid::Uuid
+        >
+    }
 }
+
+
+
 
 /// Instructions
 #[async_trait]
 #[allow(clippy::ptr_arg)]
-pub trait Instructions<E: std::fmt::Debug + Send + Sync + 'static = ()>:
-    super::ErrorHandler<E>
-{
+pub trait Instructions<E: std::fmt::Debug + Send + Sync + 'static = ()>: super::ErrorHandler<E> {
     type Claims;
 
     /// Create instruction.
     ///
     /// V1InstructionsPost - POST /estate/v1/instructions
     async fn v1_instructions_post(
-        &self,
-
-        method: &Method,
-        host: &Host,
-        cookies: &CookieJar,
+    &self,
+    
+    method: &Method,
+    host: &Host,
+    cookies: &CookieJar,
         claims: &Self::Claims,
-        body: &models::InstructionCreate,
+            body: &models::InstructionCreate,
     ) -> Result<V1InstructionsPostResponse, E>;
 }
