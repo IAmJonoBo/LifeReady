@@ -1,8 +1,8 @@
 use audit_verifier::verify_bundle;
 use axum::{
+    Router,
     body::Body,
     http::{Request, StatusCode},
-    Router,
 };
 use http_body_util::BodyExt;
 use lifeready_auth::{AccessLevel, AuthConfig, Claims, Role, SensitivityTier};
@@ -197,7 +197,7 @@ async fn export_bundle_verifies_and_detects_tamper() {
 
 async fn reset_db(pool: &PgPool) {
     sqlx::query(
-        "TRUNCATE audit_events, document_versions, documents, mhca39_evidence, mhca39_cases, case_artifacts, cases RESTART IDENTITY",
+        "TRUNCATE audit_events, document_versions, documents, mhca39_evidence, mhca39_cases, case_evidence, will_prep_cases, deceased_estate_cases, case_artifacts, cases RESTART IDENTITY CASCADE",
     )
     .execute(pool)
     .await
@@ -226,12 +226,13 @@ fn sha256_file(path: &std::path::Path) -> String {
 
 fn default_slots() -> Vec<&'static str> {
     vec![
-        "id_subject",
-        "id_applicant",
-        "address_subject",
-        "asset_summary",
-        "medical_evidence_1",
-        "medical_evidence_2",
+        "medical_certificate_1",
+        "medical_certificate_2",
+        "assets_income_schedule",
+        "applicant_id_copy",
+        "patient_id_copy",
+        "supporting_affidavit",
+        "mhca39_form_data",
     ]
 }
 

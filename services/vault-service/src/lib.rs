@@ -149,7 +149,7 @@ pub fn router() -> Router {
         .route("/v1/documents", post(init_document))
         .route(
             "/v1/documents/{document_id}/versions",
-            post(commit_document),
+            get(list_versions).post(commit_document),
         )
         .route("/v1/documents/{document_id}", get(get_document))
         .route("/v1/documents/{document_id}/download", get(download_document))
@@ -210,6 +210,11 @@ struct DocumentVersionResponse {
     version_id: String,
     sha256: String,
     created_at: String,
+}
+
+#[derive(Debug, Serialize)]
+struct DocumentVersionListResponse {
+    items: Vec<DocumentVersionResponse>,
 }
 
 #[derive(Debug, Serialize)]
@@ -359,6 +364,72 @@ async fn commit_document(
         created_at: created_at.to_rfc3339(),
     };
     Ok((StatusCode::CREATED, Json(response)))
+}
+
+async fn list_versions(
+    State(state): State<AppState>,
+    ctx: RequestContext,
+    Extension(request_id): Extension<RequestId>,
+    Path(document_id): Path<String>,
+) -> Result<Json<DocumentVersionListResponse>, axum::response::Response> {
+    let pool = match &state.pool {
+        Some(pool) => pool,
+        None => return Err(invalid_request(Some(request_id), "database unavailable")),
+    };
+    require_role(&ctx, &[Role::Principal, Role::Proxy, Role::ExecutorNominee])
+        .map_err(|error| error.into_response(Some(request_id)))?;
+    require_tier(&ctx, TierRequirement::Min(SensitivityTier::Amber))
+        .map_err(|error| error.into_response(Some(request_id)))?;
+    require_scope(&ctx, "read:all").map_err(|error| error.into_response(Some(request_id)))?;
+
+    let document_id = parse_uuid(&document_id)
+        .ok_or_else(|| invalid_request(Some(request_id), "invalid document_id"))?;
+    let principal_id = parse_uuid(&ctx.principal_id)
+        .ok_or_else(|| invalid_request(Some(request_id), "invalid principal_id"))?;
+
+    let exists =
+        sqlx::query("SELECT 1 FROM documents WHERE document_id = $1 AND principal_id = $2")
+            .bind(document_id)
+            .bind(principal_id)
+            .fetch_optional(pool)
+            .await
+            .map_err(|error| db_error_to_response(error, request_id))?
+            .is_some();
+    if !exists {
+        return Err(not_found(Some(request_id), "document not found"));
+    }
+
+    let rows = sqlx::query(
+        "SELECT version_id, sha256, created_at \
+         FROM document_versions WHERE document_id = $1 ORDER BY created_at DESC",
+    )
+    .bind(document_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|error| db_error_to_response(error, request_id))?;
+
+    let mut items = Vec::new();
+    let document_id_str = document_id.to_string();
+    for row in rows {
+        let version_id: uuid::Uuid = row
+            .try_get("version_id")
+            .map_err(|error| db_error_to_response(error.into(), request_id))?;
+        let sha256: String = row
+            .try_get("sha256")
+            .map_err(|error| db_error_to_response(error.into(), request_id))?;
+        let created_at: chrono::DateTime<Utc> = row
+            .try_get("created_at")
+            .map_err(|error| db_error_to_response(error.into(), request_id))?;
+
+        items.push(DocumentVersionResponse {
+            document_id: document_id_str.clone(),
+            version_id: version_id.to_string(),
+            sha256,
+            created_at: created_at.to_rfc3339(),
+        });
+    }
+
+    Ok(Json(DocumentVersionListResponse { items }))
 }
 
 async fn get_document(
@@ -733,9 +804,19 @@ fn db_error_to_response(error: sqlx::Error, request_id: RequestId) -> axum::resp
         if db_error.code().as_deref() == Some("23505") {
             return conflict(Some(request_id), "duplicate version for document");
         }
-        return invalid_request(Some(request_id), db_error.message().to_string());
+        tracing::warn!(
+            request_id = %request_id.0,
+            error = %db_error.message(),
+            "database error"
+        );
+        return invalid_request(Some(request_id), "database operation failed");
     }
-    invalid_request(Some(request_id), error.to_string())
+    tracing::warn!(
+        request_id = %request_id.0,
+        error = %error,
+        "database error"
+    );
+    invalid_request(Some(request_id), "database operation failed")
 }
 
 fn normalize_blob_ref(
@@ -756,8 +837,25 @@ fn normalize_blob_ref(
     };
 
     let path = candidate.strip_prefix("file://").unwrap_or(&candidate);
-    if !std::path::Path::new(path).exists() {
+    let resolved = std::path::Path::new(path);
+    if !resolved.exists() {
         return Err(invalid_request(Some(request_id), "blob_ref does not exist"));
+    }
+
+    // Prevent path traversal: resolved path must be within storage_dir.
+    if let (Ok(canonical_storage), Ok(canonical_resolved)) =
+        (storage_dir.canonicalize(), resolved.canonicalize())
+    {
+        if !canonical_resolved.starts_with(&canonical_storage) {
+            tracing::warn!(
+                blob_ref = blob_ref,
+                "normalize_blob_ref rejected: path escapes storage directory"
+            );
+            return Err(invalid_request(
+                Some(request_id),
+                "blob_ref outside storage directory",
+            ));
+        }
     }
 
     Ok(candidate)
@@ -873,8 +971,9 @@ mod tests {
         let auto = normalize_blob_ref("", &base, document_id, request_id).unwrap();
         assert!(auto.starts_with("file://"));
 
-        let custom = normalize_blob_ref("file:///tmp", &base, document_id, request_id).unwrap();
-        assert_eq!(custom, "file:///tmp");
+        // file:// outside storage_dir should be rejected
+        let outside = normalize_blob_ref("file:///tmp", &base, document_id, request_id);
+        assert_eq!(outside.unwrap_err().status(), StatusCode::BAD_REQUEST);
 
         let missing = normalize_blob_ref("missing", &base, document_id, request_id);
         assert_eq!(missing.unwrap_err().status(), StatusCode::BAD_REQUEST);
@@ -1464,5 +1563,39 @@ mod tests {
         assert_eq!(sanitize_filename("my file.pdf"), "my file.pdf");
         assert_eq!(sanitize_filename("file/with/path"), "file_with_path");
         assert_eq!(sanitize_filename("file<>:\"\\"), "file_____");
+    }
+
+    #[tokio::test]
+    async fn list_versions_rejects_invalid_document_id() {
+        with_env_async(
+            &[
+                ("LIFEREADY_ENV", Some("dev")),
+                ("JWT_SECRET", Some("test-secret-32-chars-minimum!!")),
+                (
+                    "DATABASE_URL",
+                    Some("postgres://postgres:postgres@127.0.0.1:5432/lifeready"),
+                ),
+            ],
+            || async {
+                let app = router();
+                let response = axum::Router::into_service(app)
+                    .oneshot(
+                        Request::builder()
+                            .method("GET")
+                            .uri("/v1/documents/not-a-uuid/versions")
+                            .header(
+                                "authorization",
+                                format!("Bearer {}", auth_token(AccessLevel::ReadOnlyAll)),
+                            )
+                            .body(Body::empty())
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+
+                assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+            },
+        )
+        .await;
     }
 }

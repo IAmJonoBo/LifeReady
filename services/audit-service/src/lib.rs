@@ -388,9 +388,19 @@ fn db_error_to_response(error: sqlx::Error, request_id: RequestId) -> axum::resp
         if db_error.code().as_deref() == Some("23505") {
             return conflict(Some(request_id), "duplicate audit event");
         }
-        return invalid_request(Some(request_id), db_error.message().to_string());
+        tracing::warn!(
+            request_id = %request_id.0,
+            error = %db_error.message(),
+            "database error"
+        );
+        return invalid_request(Some(request_id), "database operation failed");
     }
-    invalid_request(Some(request_id), error.to_string())
+    tracing::warn!(
+        request_id = %request_id.0,
+        error = %error,
+        "database error"
+    );
+    invalid_request(Some(request_id), "database operation failed")
 }
 
 #[cfg(test)]

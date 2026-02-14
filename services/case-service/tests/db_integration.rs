@@ -4,6 +4,7 @@ use axum::{
 };
 use http_body_util::BodyExt;
 use lifeready_auth::{AccessLevel, AuthConfig, Claims, Role, SensitivityTier};
+use sha2::Digest;
 use sqlx::{PgPool, Row};
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -126,12 +127,31 @@ async fn ensure_schema(pool: &PgPool) -> Result<(), sqlx::Error> {
     sqlx::query(
         "DO $$ BEGIN \
          IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'case_type') THEN \
-         CREATE TYPE case_type AS ENUM ('emergency_pack','mhca39','death_readiness'); \
+         CREATE TYPE case_type AS ENUM ('emergency_pack','mhca39','death_readiness','will_prep_sa','deceased_estate_reporting_sa'); \
          END IF; \
          END $$;",
     )
     .execute(pool)
     .await?;
+    // Add new enum values if they don't exist (for existing DBs)
+    sqlx::query(
+        "DO $$ BEGIN \
+         ALTER TYPE case_type ADD VALUE IF NOT EXISTS 'will_prep_sa'; \
+         EXCEPTION WHEN duplicate_object THEN NULL; \
+         END $$;",
+    )
+    .execute(pool)
+    .await
+    .ok();
+    sqlx::query(
+        "DO $$ BEGIN \
+         ALTER TYPE case_type ADD VALUE IF NOT EXISTS 'deceased_estate_reporting_sa'; \
+         EXCEPTION WHEN duplicate_object THEN NULL; \
+         END $$;",
+    )
+    .execute(pool)
+    .await
+    .ok();
     sqlx::query(
         "DO $$ BEGIN \
          IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'case_status') THEN \
@@ -231,12 +251,46 @@ async fn ensure_schema(pool: &PgPool) -> Result<(), sqlx::Error> {
     )
     .execute(pool)
     .await?;
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS case_evidence (\
+            evidence_id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),\
+            case_id uuid NOT NULL REFERENCES cases(case_id) ON DELETE CASCADE,\
+            slot_name text NOT NULL,\
+            document_id uuid,\
+            added_at timestamptz NOT NULL DEFAULT now(),\
+            UNIQUE(case_id, slot_name)\
+        );",
+    )
+    .execute(pool)
+    .await?;
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS will_prep_cases (\
+            case_id uuid PRIMARY KEY REFERENCES cases(case_id) ON DELETE CASCADE,\
+            principal_person_id uuid NOT NULL,\
+            required_evidence_slots text[] NOT NULL,\
+            notes text\
+        );",
+    )
+    .execute(pool)
+    .await?;
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS deceased_estate_cases (\
+            case_id uuid PRIMARY KEY REFERENCES cases(case_id) ON DELETE CASCADE,\
+            deceased_person_id uuid NOT NULL,\
+            executor_person_id uuid NOT NULL,\
+            estimated_estate_value_zar numeric,\
+            required_evidence_slots text[] NOT NULL,\
+            notes text\
+        );",
+    )
+    .execute(pool)
+    .await?;
     Ok(())
 }
 
 async fn reset_db(pool: &PgPool) -> Result<(), sqlx::Error> {
     sqlx::query(
-        "TRUNCATE audit_events, document_versions, documents, mhca39_evidence, mhca39_cases, case_artifacts, cases RESTART IDENTITY CASCADE",
+        "TRUNCATE audit_events, document_versions, documents, mhca39_evidence, mhca39_cases, case_evidence, will_prep_cases, deceased_estate_cases, case_artifacts, cases RESTART IDENTITY CASCADE",
     )
         .execute(pool)
         .await?;
@@ -826,8 +880,8 @@ async fn create_mhca39_uses_default_slots() {
         .await
         .unwrap();
     let slots: Vec<String> = row.try_get("required_evidence_slots").unwrap();
-    assert!(slots.len() >= 6);
-    assert!(slots.contains(&"id_subject".to_string()));
+    assert!(slots.len() >= 7);
+    assert!(slots.contains(&"medical_certificate_1".to_string()));
 }
 
 #[tokio::test]
@@ -1678,4 +1732,367 @@ async fn export_case_rejects_invalid_principal_id() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+fn sha256_bytes(data: &[u8]) -> String {
+    let mut hasher = sha2::Sha256::new();
+    hasher.update(data);
+    hex::encode(hasher.finalize())
+}
+
+#[tokio::test]
+async fn create_will_prep_sa_persists_case() {
+    init_env();
+    let pool = match setup_db().await {
+        Some(pool) => pool,
+        None => return,
+    };
+    reset_db(&pool).await.unwrap();
+
+    let app = case_service::router();
+    let body = serde_json::json!({
+        "principal_person_id": "00000000-0000-0000-0000-000000000011",
+        "notes": "test will"
+    })
+    .to_string();
+
+    let response = axum::Router::into_service(app)
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/cases/will-prep-sa")
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {}", token_write()))
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let case_id = value.get("case_id").and_then(|v| v.as_str()).unwrap();
+    let case_uuid = Uuid::parse_str(case_id).unwrap();
+
+    let row = sqlx::query("SELECT case_type FROM cases WHERE case_id = $1")
+        .bind(case_uuid)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let case_type: String = row.try_get("case_type").unwrap();
+    assert_eq!(case_type, "will_prep_sa");
+
+    let row = sqlx::query("SELECT required_evidence_slots FROM will_prep_cases WHERE case_id = $1")
+        .bind(case_uuid)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let slots: Vec<String> = row.try_get("required_evidence_slots").unwrap();
+    assert!(slots.len() >= 5);
+    assert!(slots.contains(&"draft_will_document".to_string()));
+}
+
+#[tokio::test]
+async fn create_deceased_estate_sa_persists_case() {
+    init_env();
+    let pool = match setup_db().await {
+        Some(pool) => pool,
+        None => return,
+    };
+    reset_db(&pool).await.unwrap();
+
+    let app = case_service::router();
+    let body = serde_json::json!({
+        "deceased_person_id": "00000000-0000-0000-0000-000000000033",
+        "executor_person_id": "00000000-0000-0000-0000-000000000044",
+        "estimated_estate_value_zar": 500000.0,
+        "notes": "test estate"
+    })
+    .to_string();
+
+    let response = axum::Router::into_service(app)
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/cases/deceased-estate-sa")
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {}", token_write()))
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let case_id = value.get("case_id").and_then(|v| v.as_str()).unwrap();
+    let case_uuid = Uuid::parse_str(case_id).unwrap();
+
+    let row = sqlx::query("SELECT case_type FROM cases WHERE case_id = $1")
+        .bind(case_uuid)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let case_type: String = row.try_get("case_type").unwrap();
+    assert_eq!(case_type, "deceased_estate_reporting_sa");
+
+    let row = sqlx::query(
+        "SELECT required_evidence_slots FROM deceased_estate_cases WHERE case_id = $1",
+    )
+    .bind(case_uuid)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let slots: Vec<String> = row.try_get("required_evidence_slots").unwrap();
+    assert!(slots.len() >= 7);
+    assert!(slots.contains(&"death_certificate".to_string()));
+}
+
+#[tokio::test]
+async fn will_prep_sa_attach_and_export() {
+    init_env();
+    let pool = match setup_db().await {
+        Some(pool) => pool,
+        None => return,
+    };
+    reset_db(&pool).await.unwrap();
+
+    let storage_dir = unique_dir("will-storage");
+    let export_dir = unique_dir("will-exports");
+    std::fs::create_dir_all(&storage_dir).unwrap();
+    std::fs::create_dir_all(&export_dir).unwrap();
+    unsafe {
+        std::env::set_var(
+            "LOCAL_STORAGE_DIR",
+            storage_dir.to_string_lossy().to_string(),
+        );
+        std::env::set_var("LOCAL_EXPORT_DIR", export_dir.to_string_lossy().to_string());
+    }
+
+    let principal_id = Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap();
+
+    let app = case_service::router();
+    let body = serde_json::json!({
+        "principal_person_id": principal_id.to_string(),
+        "required_evidence_slots": ["draft_will_document"]
+    })
+    .to_string();
+
+    let response = axum::Router::into_service(app.clone())
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/cases/will-prep-sa")
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {}", token_write()))
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let case_id = value.get("case_id").and_then(|v| v.as_str()).unwrap().to_string();
+
+    let document_id = Uuid::new_v4();
+    let blob_path = storage_dir.join(format!("{}.bin", document_id));
+    std::fs::write(&blob_path, b"draft will content").unwrap();
+    let sha256 = sha256_bytes(b"draft will content");
+
+    sqlx::query(
+        "INSERT INTO documents (document_id, principal_id, document_type, title, sensitivity, tags) VALUES ($1, $2, $3::document_type, $4, $5::sensitivity_tier, $6)",
+    )
+    .bind(document_id)
+    .bind(principal_id)
+    .bind("will")
+    .bind("Draft Will")
+    .bind("amber")
+    .bind(Vec::<String>::new())
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    sqlx::query(
+        "INSERT INTO document_versions (document_id, blob_ref, sha256, byte_size, mime_type) VALUES ($1, $2, $3, $4, $5)",
+    )
+    .bind(document_id)
+    .bind(format!("file://{}", blob_path.display()))
+    .bind(&sha256)
+    .bind(18_i64)
+    .bind("application/pdf")
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let attach_body = serde_json::json!({"document_id": document_id.to_string()}).to_string();
+    let response = axum::Router::into_service(app.clone())
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri(format!("/v1/cases/{case_id}/evidence/draft_will_document"))
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {}", token_write()))
+                .body(Body::from(attach_body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let response = axum::Router::into_service(app)
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/v1/cases/{case_id}/export"))
+                .header("authorization", format!("Bearer {}", token_read()))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let download_url = value.get("download_url").and_then(|v| v.as_str()).unwrap();
+    let bundle_path = download_url.strip_prefix("file://").unwrap();
+
+    let manifest_path = std::path::Path::new(bundle_path).join("manifest.json");
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&manifest_path).unwrap()).unwrap();
+    assert_eq!(manifest["case_type"].as_str().unwrap(), "will_prep_sa");
+
+    let instructions_path = std::path::Path::new(bundle_path).join("witnessing_instructions.md");
+    let instructions = std::fs::read_to_string(&instructions_path).unwrap();
+    assert!(instructions.contains("two competent witnesses"));
+    assert!(instructions.contains("present simultaneously"));
+}
+
+#[tokio::test]
+async fn deceased_estate_sa_attach_and_export() {
+    init_env();
+    let pool = match setup_db().await {
+        Some(pool) => pool,
+        None => return,
+    };
+    reset_db(&pool).await.unwrap();
+
+    let storage_dir = unique_dir("estate-storage");
+    let export_dir = unique_dir("estate-exports");
+    std::fs::create_dir_all(&storage_dir).unwrap();
+    std::fs::create_dir_all(&export_dir).unwrap();
+    unsafe {
+        std::env::set_var(
+            "LOCAL_STORAGE_DIR",
+            storage_dir.to_string_lossy().to_string(),
+        );
+        std::env::set_var("LOCAL_EXPORT_DIR", export_dir.to_string_lossy().to_string());
+    }
+
+    let principal_id = Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap();
+
+    let app = case_service::router();
+    let body = serde_json::json!({
+        "deceased_person_id": "00000000-0000-0000-0000-000000000033",
+        "executor_person_id": "00000000-0000-0000-0000-000000000044",
+        "estimated_estate_value_zar": 300000.0,
+        "required_evidence_slots": ["death_certificate"]
+    })
+    .to_string();
+
+    let response = axum::Router::into_service(app.clone())
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/cases/deceased-estate-sa")
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {}", token_write()))
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let case_id = value.get("case_id").and_then(|v| v.as_str()).unwrap().to_string();
+
+    let document_id = Uuid::new_v4();
+    let blob_path = storage_dir.join(format!("{}.bin", document_id));
+    std::fs::write(&blob_path, b"death certificate content").unwrap();
+    let sha256 = sha256_bytes(b"death certificate content");
+
+    sqlx::query(
+        "INSERT INTO documents (document_id, principal_id, document_type, title, sensitivity, tags) VALUES ($1, $2, $3::document_type, $4, $5::sensitivity_tier, $6)",
+    )
+    .bind(document_id)
+    .bind(principal_id)
+    .bind("other")
+    .bind("Death Certificate")
+    .bind("red")
+    .bind(Vec::<String>::new())
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    sqlx::query(
+        "INSERT INTO document_versions (document_id, blob_ref, sha256, byte_size, mime_type) VALUES ($1, $2, $3, $4, $5)",
+    )
+    .bind(document_id)
+    .bind(format!("file://{}", blob_path.display()))
+    .bind(&sha256)
+    .bind(25_i64)
+    .bind("application/pdf")
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let attach_body = serde_json::json!({"document_id": document_id.to_string()}).to_string();
+    let response = axum::Router::into_service(app.clone())
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri(format!("/v1/cases/{case_id}/evidence/death_certificate"))
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {}", token_write()))
+                .body(Body::from(attach_body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let response = axum::Router::into_service(app)
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/v1/cases/{case_id}/export"))
+                .header("authorization", format!("Bearer {}", token_read()))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let download_url = value.get("download_url").and_then(|v| v.as_str()).unwrap();
+    let bundle_path = download_url.strip_prefix("file://").unwrap();
+
+    let manifest_path = std::path::Path::new(bundle_path).join("manifest.json");
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&manifest_path).unwrap()).unwrap();
+    assert_eq!(
+        manifest["case_type"].as_str().unwrap(),
+        "deceased_estate_reporting_sa"
+    );
+
+    let instructions_path = std::path::Path::new(bundle_path).join("instructions.md");
+    let instructions = std::fs::read_to_string(&instructions_path).unwrap();
+    assert!(instructions.contains("Letters of Executorship"));
+    assert!(instructions.contains("Letters of Authority"));
 }
