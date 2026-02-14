@@ -221,7 +221,23 @@ Default ports (override with `<SERVICE>_PORT` or `PORT` environment variables):
 
 ## Roadmap (high level)
 
-- **Phase 0**: repo hygiene + generation is green and deterministic
-- **Phase 1**: local dev runs (all services boot + migrations reliable)
-- **Phase 2**: auth + tiered RBAC + ProblemDetails everywhere
-- **Phase 3**: Vault flows + pack exports + audit persistence + verifier wiring
+- **Phase 0**: repo hygiene + generation is green and deterministic ✅
+- **Phase 1**: local dev runs (all services boot + migrations reliable) ✅
+- **Phase 2**: auth + tiered RBAC + ProblemDetails everywhere ✅
+- **Phase 3**: Vault flows + pack exports + audit persistence + verifier wiring ✅
+  - Emergency Directive, MHCA 39, Will Prep, Deceased Estate, POPIA Incident packs
+  - State machine transitions per PRD §7
+  - Audit hash-chain verification (audit-verifier CLI)
+
+---
+
+## Documentation
+
+- [Product Requirements](docs/PRD.md)
+- [Threat Model](docs/threat-model.md)
+- [Data Retention Matrix](docs/retention-matrix.md)
+- [POPIA Incident Workflow](docs/incident-workflow.md)
+- [Operational Runbooks](docs/ops/runbooks.md)
+- [Architecture Decision Records](docs/adr/README.md)
+- [Release Go/No-Go Checklist](docs/releases/go-no-go-checklist.md)
+- [E2E Production Readiness](docs/e2e-production-readiness-task-board.md)
