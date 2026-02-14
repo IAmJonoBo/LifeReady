@@ -1,9 +1,16 @@
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
-CREATE TYPE sensitivity_tier AS ENUM ('green','amber','red');
-CREATE TYPE document_type AS ENUM (
-  'id','proof_of_address','will','advance_directive','medical_letter','policy','statement','other'
-);
+DO $$ BEGIN
+  CREATE TYPE sensitivity_tier AS ENUM ('green','amber','red');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$ BEGIN
+  CREATE TYPE document_type AS ENUM (
+    'id','proof_of_address','will','advance_directive','medical_letter','policy','statement','other'
+  );
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
 CREATE TABLE documents (
   document_id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),

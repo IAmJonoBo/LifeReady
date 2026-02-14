@@ -1,7 +1,14 @@
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
-CREATE TYPE case_type AS ENUM ('emergency_pack','mhca39','death_readiness');
-CREATE TYPE case_status AS ENUM ('draft','ready','blocked','exported','closed','revoked');
+DO $$ BEGIN
+  CREATE TYPE case_type AS ENUM ('emergency_pack','mhca39','death_readiness');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$ BEGIN
+  CREATE TYPE case_status AS ENUM ('draft','ready','blocked','exported','closed','revoked');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
 CREATE TABLE cases (
   case_id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
