@@ -1432,13 +1432,28 @@ fn default_deceased_estate_slots() -> Vec<String> {
 }
 
 fn resolve_blob_ref(blob_ref: &str, storage_dir: &PathBuf) -> Option<PathBuf> {
-    if let Some(path) = blob_ref.strip_prefix("file://") {
-        return Some(PathBuf::from(path));
+    let resolved = if let Some(path) = blob_ref.strip_prefix("file://") {
+        PathBuf::from(path)
+    } else if blob_ref.starts_with('/') {
+        PathBuf::from(blob_ref)
+    } else {
+        storage_dir.join(blob_ref)
+    };
+
+    // Prevent path traversal: resolved path must be within storage_dir.
+    if let (Ok(canonical_storage), Ok(canonical_resolved)) =
+        (storage_dir.canonicalize(), resolved.canonicalize())
+    {
+        if !canonical_resolved.starts_with(&canonical_storage) {
+            tracing::warn!(
+                blob_ref = blob_ref,
+                "resolve_blob_ref rejected: path escapes storage directory"
+            );
+            return None;
+        }
     }
-    if blob_ref.starts_with('/') {
-        return Some(PathBuf::from(blob_ref));
-    }
-    Some(storage_dir.join(blob_ref))
+
+    Some(resolved)
 }
 
 fn sha256_bytes(bytes: &[u8]) -> String {
@@ -1627,9 +1642,19 @@ fn db_error_to_response(error: sqlx::Error, request_id: RequestId) -> axum::resp
         if db_error.code().as_deref() == Some("23505") {
             return conflict(Some(request_id), "duplicate record");
         }
-        return invalid_request(Some(request_id), db_error.message().to_string());
+        tracing::warn!(
+            request_id = %request_id.0,
+            error = %db_error.message(),
+            "database error"
+        );
+        return invalid_request(Some(request_id), "database operation failed");
     }
-    invalid_request(Some(request_id), error.to_string())
+    tracing::warn!(
+        request_id = %request_id.0,
+        error = %error,
+        "database error"
+    );
+    invalid_request(Some(request_id), "database operation failed")
 }
 
 #[cfg(test)]
@@ -1713,15 +1738,34 @@ mod tests {
 
     #[test]
     fn resolve_blob_ref_handles_prefixes() {
-        let base = PathBuf::from("storage");
-        let absolute = resolve_blob_ref("/tmp/example", &base).unwrap();
-        assert_eq!(absolute, PathBuf::from("/tmp/example"));
+        let base = std::env::temp_dir().join(format!("resolve-blob-test-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&base).unwrap();
 
-        let file = resolve_blob_ref("file:///tmp/blob", &base).unwrap();
-        assert_eq!(file, PathBuf::from("/tmp/blob"));
-
+        // Relative path inside storage_dir
+        let inner_file = base.join("blob.bin");
+        std::fs::write(&inner_file, b"").unwrap();
         let relative = resolve_blob_ref("blob.bin", &base).unwrap();
         assert_eq!(relative, base.join("blob.bin"));
+
+        // file:// inside storage_dir
+        let file_inside = resolve_blob_ref(
+            &format!("file://{}", inner_file.display()),
+            &base,
+        )
+        .unwrap();
+        assert_eq!(file_inside, inner_file);
+
+        // Absolute path outside storage_dir should be rejected
+        let outside = resolve_blob_ref("/etc/passwd", &base);
+        assert!(outside.is_none(), "path outside storage_dir must be rejected");
+
+        // file:// path outside storage_dir should be rejected
+        let file_outside = resolve_blob_ref("file:///etc/passwd", &base);
+        assert!(file_outside.is_none(), "file:// outside storage_dir must be rejected");
+
+        // Traversal via ../ should be rejected when target escapes
+        let traversal = resolve_blob_ref("../../../etc/passwd", &base);
+        assert!(traversal.is_none(), "traversal outside storage_dir must be rejected");
     }
 
     #[test]

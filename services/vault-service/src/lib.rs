@@ -804,9 +804,19 @@ fn db_error_to_response(error: sqlx::Error, request_id: RequestId) -> axum::resp
         if db_error.code().as_deref() == Some("23505") {
             return conflict(Some(request_id), "duplicate version for document");
         }
-        return invalid_request(Some(request_id), db_error.message().to_string());
+        tracing::warn!(
+            request_id = %request_id.0,
+            error = %db_error.message(),
+            "database error"
+        );
+        return invalid_request(Some(request_id), "database operation failed");
     }
-    invalid_request(Some(request_id), error.to_string())
+    tracing::warn!(
+        request_id = %request_id.0,
+        error = %error,
+        "database error"
+    );
+    invalid_request(Some(request_id), "database operation failed")
 }
 
 fn normalize_blob_ref(
@@ -827,8 +837,25 @@ fn normalize_blob_ref(
     };
 
     let path = candidate.strip_prefix("file://").unwrap_or(&candidate);
-    if !std::path::Path::new(path).exists() {
+    let resolved = std::path::Path::new(path);
+    if !resolved.exists() {
         return Err(invalid_request(Some(request_id), "blob_ref does not exist"));
+    }
+
+    // Prevent path traversal: resolved path must be within storage_dir.
+    if let (Ok(canonical_storage), Ok(canonical_resolved)) =
+        (storage_dir.canonicalize(), resolved.canonicalize())
+    {
+        if !canonical_resolved.starts_with(&canonical_storage) {
+            tracing::warn!(
+                blob_ref = blob_ref,
+                "normalize_blob_ref rejected: path escapes storage directory"
+            );
+            return Err(invalid_request(
+                Some(request_id),
+                "blob_ref outside storage directory",
+            ));
+        }
     }
 
     Ok(candidate)
@@ -944,8 +971,9 @@ mod tests {
         let auto = normalize_blob_ref("", &base, document_id, request_id).unwrap();
         assert!(auto.starts_with("file://"));
 
-        let custom = normalize_blob_ref("file:///tmp", &base, document_id, request_id).unwrap();
-        assert_eq!(custom, "file:///tmp");
+        // file:// outside storage_dir should be rejected
+        let outside = normalize_blob_ref("file:///tmp", &base, document_id, request_id);
+        assert_eq!(outside.unwrap_err().status(), StatusCode::BAD_REQUEST);
 
         let missing = normalize_blob_ref("missing", &base, document_id, request_id);
         assert_eq!(missing.unwrap_err().status(), StatusCode::BAD_REQUEST);
