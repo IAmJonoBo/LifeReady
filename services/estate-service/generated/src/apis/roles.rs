@@ -13,41 +13,78 @@ use crate::{models, types::*};
 #[allow(clippy::large_enum_variant)]
 pub enum V1RolesGrantsPostResponse {
     /// Created
-    Status201_Created {
+    Status201_Created
+    {
         body: models::RoleGrant,
-        x_request_id: Option<uuid::Uuid>,
-    },
+        x_request_id:
+        Option<
+        uuid::Uuid
+        >
+    }
+    ,
     /// Error response
-    Status400_ErrorResponse {
+    Status400_ErrorResponse
+    {
         body: models::V1PeopleGet400Response,
-        x_request_id: Option<uuid::Uuid>,
-    },
+        x_request_id:
+        Option<
+        uuid::Uuid
+        >
+    }
+    ,
     /// Unauthorized
-    Status401_Unauthorized {
+    Status401_Unauthorized
+    {
         body: models::V1PeopleGet400Response,
-        x_request_id: Option<uuid::Uuid>,
-    },
+        x_request_id:
+        Option<
+        uuid::Uuid
+        >
+    }
+    ,
     /// Forbidden
-    Status403_Forbidden {
+    Status403_Forbidden
+    {
         body: models::V1PeopleGet400Response,
-        x_request_id: Option<uuid::Uuid>,
-    },
+        x_request_id:
+        Option<
+        uuid::Uuid
+        >
+    }
+    ,
     /// Conflict
-    Status409_Conflict {
+    Status409_Conflict
+    {
         body: models::V1PeopleGet400Response,
-        x_request_id: Option<uuid::Uuid>,
-    },
+        x_request_id:
+        Option<
+        uuid::Uuid
+        >
+    }
+    ,
     /// Unprocessable Entity
-    Status422_UnprocessableEntity {
+    Status422_UnprocessableEntity
+    {
         body: models::V1PeopleGet400Response,
-        x_request_id: Option<uuid::Uuid>,
-    },
+        x_request_id:
+        Option<
+        uuid::Uuid
+        >
+    }
+    ,
     /// Internal Server Error
-    Status500_InternalServerError {
+    Status500_InternalServerError
+    {
         body: models::V1PeopleGet400Response,
-        x_request_id: Option<uuid::Uuid>,
-    },
+        x_request_id:
+        Option<
+        uuid::Uuid
+        >
+    }
 }
+
+
+
 
 /// Roles
 #[async_trait]
@@ -59,12 +96,12 @@ pub trait Roles<E: std::fmt::Debug + Send + Sync + 'static = ()>: super::ErrorHa
     ///
     /// V1RolesGrantsPost - POST /estate/v1/roles/grants
     async fn v1_roles_grants_post(
-        &self,
-
-        method: &Method,
-        host: &Host,
-        cookies: &CookieJar,
+    &self,
+    
+    method: &Method,
+    host: &Host,
+    cookies: &CookieJar,
         claims: &Self::Claims,
-        body: &models::RoleGrantCreate,
+            body: &models::RoleGrantCreate,
     ) -> Result<V1RolesGrantsPostResponse, E>;
 }

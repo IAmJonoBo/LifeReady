@@ -13,41 +13,78 @@ use crate::{models, types::*};
 #[allow(clippy::large_enum_variant)]
 pub enum V1AssetsPostResponse {
     /// Created
-    Status201_Created {
+    Status201_Created
+    {
         body: models::Asset,
-        x_request_id: Option<uuid::Uuid>,
-    },
+        x_request_id:
+        Option<
+        uuid::Uuid
+        >
+    }
+    ,
     /// Error response
-    Status400_ErrorResponse {
+    Status400_ErrorResponse
+    {
         body: models::V1PeopleGet400Response,
-        x_request_id: Option<uuid::Uuid>,
-    },
+        x_request_id:
+        Option<
+        uuid::Uuid
+        >
+    }
+    ,
     /// Unauthorized
-    Status401_Unauthorized {
+    Status401_Unauthorized
+    {
         body: models::V1PeopleGet400Response,
-        x_request_id: Option<uuid::Uuid>,
-    },
+        x_request_id:
+        Option<
+        uuid::Uuid
+        >
+    }
+    ,
     /// Forbidden
-    Status403_Forbidden {
+    Status403_Forbidden
+    {
         body: models::V1PeopleGet400Response,
-        x_request_id: Option<uuid::Uuid>,
-    },
+        x_request_id:
+        Option<
+        uuid::Uuid
+        >
+    }
+    ,
     /// Conflict
-    Status409_Conflict {
+    Status409_Conflict
+    {
         body: models::V1PeopleGet400Response,
-        x_request_id: Option<uuid::Uuid>,
-    },
+        x_request_id:
+        Option<
+        uuid::Uuid
+        >
+    }
+    ,
     /// Unprocessable Entity
-    Status422_UnprocessableEntity {
+    Status422_UnprocessableEntity
+    {
         body: models::V1PeopleGet400Response,
-        x_request_id: Option<uuid::Uuid>,
-    },
+        x_request_id:
+        Option<
+        uuid::Uuid
+        >
+    }
+    ,
     /// Internal Server Error
-    Status500_InternalServerError {
+    Status500_InternalServerError
+    {
         body: models::V1PeopleGet400Response,
-        x_request_id: Option<uuid::Uuid>,
-    },
+        x_request_id:
+        Option<
+        uuid::Uuid
+        >
+    }
 }
+
+
+
 
 /// Assets
 #[async_trait]
@@ -59,12 +96,12 @@ pub trait Assets<E: std::fmt::Debug + Send + Sync + 'static = ()>: super::ErrorH
     ///
     /// V1AssetsPost - POST /estate/v1/assets
     async fn v1_assets_post(
-        &self,
-
-        method: &Method,
-        host: &Host,
-        cookies: &CookieJar,
+    &self,
+    
+    method: &Method,
+    host: &Host,
+    cookies: &CookieJar,
         claims: &Self::Claims,
-        body: &models::AssetCreate,
+            body: &models::AssetCreate,
     ) -> Result<V1AssetsPostResponse, E>;
 }

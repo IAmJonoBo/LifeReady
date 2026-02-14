@@ -11,32 +11,81 @@ use crate::{models, types::*};
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 #[must_use]
 #[allow(clippy::large_enum_variant)]
+pub enum ReadyzGetResponse {
+    /// Service and critical dependencies are ready to serve traffic
+    Status200_ServiceAndCriticalDependenciesAreReadyToServeTraffic
+    {
+        body: models::ReadyzGet200Response,
+        x_request_id:
+        Option<
+        uuid::Uuid
+        >
+    }
+    ,
+    /// Service is reachable but critical dependencies are not ready
+    Status503_ServiceIsReachableButCriticalDependenciesAreNotReady
+    {
+        body: models::ReadyzGet200Response,
+        x_request_id:
+        Option<
+        uuid::Uuid
+        >
+    }
+}
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[must_use]
+#[allow(clippy::large_enum_variant)]
 pub enum V1PeopleGetResponse {
     /// OK
-    Status200_OK {
+    Status200_OK
+    {
         body: models::V1PeopleGet200Response,
-        x_request_id: Option<uuid::Uuid>,
-    },
+        x_request_id:
+        Option<
+        uuid::Uuid
+        >
+    }
+    ,
     /// Error response
-    Status400_ErrorResponse {
+    Status400_ErrorResponse
+    {
         body: models::V1PeopleGet400Response,
-        x_request_id: Option<uuid::Uuid>,
-    },
+        x_request_id:
+        Option<
+        uuid::Uuid
+        >
+    }
+    ,
     /// Unauthorized
-    Status401_Unauthorized {
+    Status401_Unauthorized
+    {
         body: models::V1PeopleGet400Response,
-        x_request_id: Option<uuid::Uuid>,
-    },
+        x_request_id:
+        Option<
+        uuid::Uuid
+        >
+    }
+    ,
     /// Forbidden
-    Status403_Forbidden {
+    Status403_Forbidden
+    {
         body: models::V1PeopleGet400Response,
-        x_request_id: Option<uuid::Uuid>,
-    },
+        x_request_id:
+        Option<
+        uuid::Uuid
+        >
+    }
+    ,
     /// Internal Server Error
-    Status500_InternalServerError {
+    Status500_InternalServerError
+    {
         body: models::V1PeopleGet400Response,
-        x_request_id: Option<uuid::Uuid>,
-    },
+        x_request_id:
+        Option<
+        uuid::Uuid
+        >
+    }
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -44,41 +93,78 @@ pub enum V1PeopleGetResponse {
 #[allow(clippy::large_enum_variant)]
 pub enum V1PeoplePostResponse {
     /// Created
-    Status201_Created {
+    Status201_Created
+    {
         body: models::Person,
-        x_request_id: Option<uuid::Uuid>,
-    },
+        x_request_id:
+        Option<
+        uuid::Uuid
+        >
+    }
+    ,
     /// Error response
-    Status400_ErrorResponse {
+    Status400_ErrorResponse
+    {
         body: models::V1PeopleGet400Response,
-        x_request_id: Option<uuid::Uuid>,
-    },
+        x_request_id:
+        Option<
+        uuid::Uuid
+        >
+    }
+    ,
     /// Unauthorized
-    Status401_Unauthorized {
+    Status401_Unauthorized
+    {
         body: models::V1PeopleGet400Response,
-        x_request_id: Option<uuid::Uuid>,
-    },
+        x_request_id:
+        Option<
+        uuid::Uuid
+        >
+    }
+    ,
     /// Forbidden
-    Status403_Forbidden {
+    Status403_Forbidden
+    {
         body: models::V1PeopleGet400Response,
-        x_request_id: Option<uuid::Uuid>,
-    },
+        x_request_id:
+        Option<
+        uuid::Uuid
+        >
+    }
+    ,
     /// Conflict
-    Status409_Conflict {
+    Status409_Conflict
+    {
         body: models::V1PeopleGet400Response,
-        x_request_id: Option<uuid::Uuid>,
-    },
+        x_request_id:
+        Option<
+        uuid::Uuid
+        >
+    }
+    ,
     /// Unprocessable Entity
-    Status422_UnprocessableEntity {
+    Status422_UnprocessableEntity
+    {
         body: models::V1PeopleGet400Response,
-        x_request_id: Option<uuid::Uuid>,
-    },
+        x_request_id:
+        Option<
+        uuid::Uuid
+        >
+    }
+    ,
     /// Internal Server Error
-    Status500_InternalServerError {
+    Status500_InternalServerError
+    {
         body: models::V1PeopleGet400Response,
-        x_request_id: Option<uuid::Uuid>,
-    },
+        x_request_id:
+        Option<
+        uuid::Uuid
+        >
+    }
 }
+
+
+
 
 /// People
 #[async_trait]
@@ -86,29 +172,41 @@ pub enum V1PeoplePostResponse {
 pub trait People<E: std::fmt::Debug + Send + Sync + 'static = ()>: super::ErrorHandler<E> {
     type Claims;
 
+    /// Readiness check (dependencies available).
+    ///
+    /// ReadyzGet - GET /estate/readyz
+    async fn readyz_get(
+    &self,
+    
+    method: &Method,
+    host: &Host,
+    cookies: &CookieJar,
+        claims: &Self::Claims,
+    ) -> Result<ReadyzGetResponse, E>;
+
     /// List people.
     ///
     /// V1PeopleGet - GET /estate/v1/people
     async fn v1_people_get(
-        &self,
-
-        method: &Method,
-        host: &Host,
-        cookies: &CookieJar,
+    &self,
+    
+    method: &Method,
+    host: &Host,
+    cookies: &CookieJar,
         claims: &Self::Claims,
-        query_params: &models::V1PeopleGetQueryParams,
+      query_params: &models::V1PeopleGetQueryParams,
     ) -> Result<V1PeopleGetResponse, E>;
 
     /// Create person (contact/role target).
     ///
     /// V1PeoplePost - POST /estate/v1/people
     async fn v1_people_post(
-        &self,
-
-        method: &Method,
-        host: &Host,
-        cookies: &CookieJar,
+    &self,
+    
+    method: &Method,
+    host: &Host,
+    cookies: &CookieJar,
         claims: &Self::Claims,
-        body: &models::PersonCreate,
+            body: &models::PersonCreate,
     ) -> Result<V1PeoplePostResponse, E>;
 }

@@ -158,6 +158,40 @@ paths:
           $ref: "./common.openapi.yaml#/components/responses/UnprocessableEntity"
         "500":
           $ref: "./common.openapi.yaml#/components/responses/ServerError"
+  /v1/cases/death-readiness:
+    post:
+      tags: [cases]
+      security:
+        - bearerAuth: []
+      summary: Create Death Readiness case (executor nominee semantics)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeathReadinessCreate"
+      responses:
+        "201":
+          description: Created
+          headers:
+            X-Request-Id:
+              $ref: "./common.openapi.yaml#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Case"
+        "400":
+          $ref: "./common.openapi.yaml#/components/responses/ProblemDetailsResponse"
+        "401":
+          $ref: "./common.openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "./common.openapi.yaml#/components/responses/Forbidden"
+        "409":
+          $ref: "./common.openapi.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "./common.openapi.yaml#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "./common.openapi.yaml#/components/responses/ServerError"
   /v1/cases/popia-incident:
     post:
       tags: [cases]
@@ -186,6 +220,48 @@ paths:
           $ref: "./common.openapi.yaml#/components/responses/Unauthorized"
         "403":
           $ref: "./common.openapi.yaml#/components/responses/Forbidden"
+        "409":
+          $ref: "./common.openapi.yaml#/components/responses/Conflict"
+        "422":
+          $ref: "./common.openapi.yaml#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "./common.openapi.yaml#/components/responses/ServerError"
+  /v1/cases/{case_id}:
+    patch:
+      tags: [cases]
+      security:
+        - bearerAuth: []
+      summary: Update case metadata (append-only revision for incidents)
+      parameters:
+        - in: path
+          name: case_id
+          required: true
+          schema:
+            $ref: "#/components/schemas/Uuid"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CaseUpdate"
+      responses:
+        "200":
+          description: Updated
+          headers:
+            X-Request-Id:
+              $ref: "./common.openapi.yaml#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Case"
+        "400":
+          $ref: "./common.openapi.yaml#/components/responses/ProblemDetailsResponse"
+        "401":
+          $ref: "./common.openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "./common.openapi.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "./common.openapi.yaml#/components/responses/NotFound"
         "409":
           $ref: "./common.openapi.yaml#/components/responses/Conflict"
         "422":
@@ -266,6 +342,80 @@ paths:
           $ref: "./common.openapi.yaml#/components/responses/Conflict"
         "422":
           $ref: "./common.openapi.yaml#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "./common.openapi.yaml#/components/responses/ServerError"
+  /v1/cases/{case_id}/link:
+    post:
+      tags: [cases]
+      security:
+        - bearerAuth: []
+      summary: Issue a time-limited share link for the case pack
+      parameters:
+        - in: path
+          name: case_id
+          required: true
+          schema:
+            $ref: "#/components/schemas/Uuid"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LinkRequest"
+      responses:
+        "200":
+          description: Link issued
+          headers:
+            X-Request-Id:
+              $ref: "./common.openapi.yaml#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LinkResponse"
+        "400":
+          $ref: "./common.openapi.yaml#/components/responses/ProblemDetailsResponse"
+        "401":
+          $ref: "./common.openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "./common.openapi.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "./common.openapi.yaml#/components/responses/NotFound"
+        "409":
+          $ref: "./common.openapi.yaml#/components/responses/Conflict"
+        "500":
+          $ref: "./common.openapi.yaml#/components/responses/ServerError"
+  /v1/cases/{case_id}/revoke:
+    post:
+      tags: [cases]
+      security:
+        - bearerAuth: []
+      summary: Revoke an issued share link immediately
+      parameters:
+        - in: path
+          name: case_id
+          required: true
+          schema:
+            $ref: "#/components/schemas/Uuid"
+      responses:
+        "200":
+          description: Revoked
+          headers:
+            X-Request-Id:
+              $ref: "./common.openapi.yaml#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RevokeResponse"
+        "400":
+          $ref: "./common.openapi.yaml#/components/responses/ProblemDetailsResponse"
+        "401":
+          $ref: "./common.openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "./common.openapi.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "./common.openapi.yaml#/components/responses/NotFound"
+        "409":
+          $ref: "./common.openapi.yaml#/components/responses/Conflict"
         "500":
           $ref: "./common.openapi.yaml#/components/responses/ServerError"
   /v1/cases/{case_id}/evidence/{slot_name}:
@@ -494,6 +644,71 @@ components:
           maxItems: 20
           items:
             type: string
+    DeathReadinessCreate:
+      type: object
+      required: [executor_nominee_person_id]
+      properties:
+        executor_nominee_person_id:
+          $ref: "#/components/schemas/Uuid"
+        asset_document_ids:
+          type: array
+          maxItems: 50
+          items:
+            $ref: "#/components/schemas/Uuid"
+        contact_document_ids:
+          type: array
+          maxItems: 50
+          items:
+            $ref: "#/components/schemas/Uuid"
+        notes:
+          type: string
+          maxLength: 4000
+    CaseUpdate:
+      type: object
+      properties:
+        summary:
+          type: string
+          maxLength: 4000
+        mitigation_steps:
+          type: string
+          maxLength: 4000
+        affected_data_classes:
+          type: array
+          maxItems: 20
+          items:
+            type: string
+            maxLength: 100
+        affected_user_count:
+          type: integer
+          minimum: 0
+        notes:
+          type: string
+          maxLength: 4000
+    LinkRequest:
+      type: object
+      properties:
+        expires_in_hours:
+          type: integer
+          minimum: 1
+          maximum: 168
+          default: 24
+    LinkResponse:
+      type: object
+      required: [share_url, expires_at]
+      properties:
+        share_url:
+          type: string
+          format: uri
+        expires_at:
+          $ref: "#/components/schemas/IsoDateTime"
+    RevokeResponse:
+      type: object
+      required: [case_id, revoked_at]
+      properties:
+        case_id:
+          $ref: "#/components/schemas/Uuid"
+        revoked_at:
+          $ref: "#/components/schemas/IsoDateTime"
     TransitionRequest:
       type: object
       required: [to_status]
