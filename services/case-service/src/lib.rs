@@ -675,7 +675,14 @@ fn allowed_transitions(case_type: &str, from: &str) -> &'static [&'static str] {
         ("popia_incident", "draft") => &["ready"],
         ("popia_incident", "ready") => &["exported"],
         ("popia_incident", "exported") => &["closed"],
-        _ => &[],
+        _ => {
+            tracing::debug!(
+                case_type = case_type,
+                from_status = from,
+                "no transitions defined for this case_type/status combination"
+            );
+            &[]
+        }
     }
 }
 
