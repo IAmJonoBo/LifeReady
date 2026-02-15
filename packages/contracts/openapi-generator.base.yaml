@@ -3,4 +3,3 @@ generatorName: rust-axum
 additionalProperties:
   useSingleRequestParameter: true
   generateAliasAsModel: true
-  hideGenerationTimestamp: true

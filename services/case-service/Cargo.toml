@@ -21,11 +21,10 @@ lifeready-audit.workspace = true
 sha2 = "0.10"
 hex = "0.4"
 rust_decimal.workspace = true
-zip = { version = "8.0", default-features = false, features = ["deflate"] }
+zip = { version = "7.4", default-features = false, features = ["deflate"] }
 walkdir = "2.5"
 
 [dev-dependencies]
-lifeready-audit.workspace = true
 bytes = "1"
 http-body-util = "0.1"
 tower = { version = "0.5", features = ["util"] }

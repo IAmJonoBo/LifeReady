@@ -1,15 +1,10 @@
 docs:
-  - changed-files:
-      - any-glob-to-any-file: "docs/**"
+  - "docs/**"
 contracts:
-  - changed-files:
-      - any-glob-to-any-file: "packages/contracts/**"
+  - "packages/contracts/**"
 flutter:
-  - changed-files:
-      - any-glob-to-any-file: "apps/lifeready_flutter/**"
+  - "apps/lifeready_flutter/**"
 services:
-  - changed-files:
-      - any-glob-to-any-file: "services/**"
+  - "services/**"
 ci:
-  - changed-files:
-      - any-glob-to-any-file: ".github/workflows/**"
+  - ".github/workflows/**"

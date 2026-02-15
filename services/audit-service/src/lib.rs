@@ -10,7 +10,6 @@ use lifeready_auth::{
     AuthConfig, AuthLayer, RequestContext, RequestId, conflict, invalid_request,
     request_id_middleware,
 };
-use lifeready_audit::zero_hash;
 use lifeready_policy::{
     Role, SensitivityTier, TierRequirement, require_role, require_scope, require_tier,
 };

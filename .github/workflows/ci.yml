@@ -40,8 +40,6 @@ jobs:
 
   rust:
     runs-on: ubuntu-latest
-    env:
-      LIFEREADY_ENV: dev
     steps:
       - uses: actions/checkout@v6
       - name: Detect Rust workspace
