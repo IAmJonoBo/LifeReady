@@ -82,7 +82,7 @@ unauthorised person to:
 ### Step 1 — Detect and report internally
 
 | Action | Owner | Timeline |
-|--------|-------|----------|
+| --- | --- | --- |
 | Identify potential compromise | Any team member | Immediately |
 | Confirm scope (affected systems, data classes, user count) | Engineering lead | Within 2 hours |
 | Escalate to responsible party (DPO / executive) | Engineering lead | Within 4 hours |
@@ -107,7 +107,7 @@ This creates a case with `case_type = popia_incident` and `status = draft`.
 Default evidence slots are created automatically:
 
 | Slot | Purpose |
-|------|---------|
+| --- | --- |
 | `incident_report` | Formal written report of the breach |
 | `affected_data_summary` | Inventory of compromised personal information categories |
 | `mitigation_evidence` | Proof of remedial steps taken |
@@ -149,7 +149,7 @@ curl -X POST /v1/cases/{case_id}/export \
 The export produces a ZIP containing:
 
 | File | Content |
-|------|---------|
+| --- | --- |
 | `popia_notification_pack.json` | Structured incident data: title, description, affected classes, user count, mitigation, evidence checklist |
 | `popia_instructions.md` | POPIA Section 22 obligations and next steps |
 | `manifest.json` | Case metadata, document checksums, audit head hash |
@@ -160,7 +160,7 @@ The export produces a ZIP containing:
 ### Step 6 — Submit to regulator and notify data subjects
 
 | Action | Owner | Timeline |
-|--------|-------|----------|
+| --- | --- | --- |
 | Submit notification pack to Information Regulator | DPO | As soon as reasonably possible |
 | Send data subject notifications | DPO + Comms | As soon as reasonably possible |
 | Record submission timestamps | DPO | Same day |
@@ -187,6 +187,7 @@ draft ──► ready ──► exported ──► closed
 ```
 
 Each transition is:
+
 - Validated against the POPIA incident state machine in `allowed_transitions()`
 - Recorded in the `case_transitions` table with actor, timestamp, and reason
 - Immutably logged in the audit trail
@@ -199,7 +200,7 @@ The notification to the Information Regulator and data subjects must
 include:
 
 | Required element | Source in LifeReady |
-|-----------------|-------------------|
+| --- | --- |
 | Description of the compromise | `popia_incident_cases.description` |
 | Category of personal information involved | `popia_incident_cases.affected_data_classes` |
 | Identity and contact details of responsible party | Organisation config (not stored per-incident) |
