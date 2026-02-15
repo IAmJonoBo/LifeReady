@@ -4,7 +4,7 @@ ignore = [
 ]
 
 [licenses]
-unlicensed = "deny"
+confidence-threshold = 0.8
 allow = [
     "MIT",
     "Apache-2.0",
@@ -12,9 +12,6 @@ allow = [
     "Unicode-3.0",
     "Zlib",
 ]
-copyleft = "deny"
-allow-osi-fsf-free = "either"
-confidence-threshold = 0.8
 
 [bans]
 multiple-versions = "warn"
