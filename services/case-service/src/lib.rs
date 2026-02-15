@@ -59,10 +59,7 @@ pub fn router() -> Router {
         .route("/v1/cases/{case_id}/link", post(link_case))
         .route("/v1/cases/{case_id}/revoke", post(revoke_case))
         .route("/v1/cases/{case_id}/export", post(export_case))
-        .route(
-            "/v1/cases/{case_id}/transition",
-            post(transition_case),
-        )
+        .route("/v1/cases/{case_id}/transition", post(transition_case))
         .route(
             "/v1/cases/{case_id}/evidence/{slot_name}",
             put(attach_evidence),
@@ -393,13 +390,15 @@ async fn create_mhca39(
     .await
     .map_err(|error| db_error_to_response(error, request_id))?;
 
-    for slot in &required_slots {
-        sqlx::query("INSERT INTO mhca39_evidence (case_id, slot_name) VALUES ($1, $2)")
-            .bind(case_id)
-            .bind(slot)
-            .execute(&mut *tx)
-            .await
-            .map_err(|error| db_error_to_response(error, request_id))?;
+    if !required_slots.is_empty() {
+        sqlx::query(
+            "INSERT INTO mhca39_evidence (case_id, slot_name) SELECT $1, * FROM UNNEST($2)",
+        )
+        .bind(case_id)
+        .bind(&required_slots)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| db_error_to_response(error, request_id))?;
     }
 
     tx.commit()
@@ -481,10 +480,10 @@ async fn create_will_prep_sa(
     .await
     .map_err(|error| db_error_to_response(error, request_id))?;
 
-    for slot in &required_slots {
-        sqlx::query("INSERT INTO case_evidence (case_id, slot_name) VALUES ($1, $2)")
+    if !required_slots.is_empty() {
+        sqlx::query("INSERT INTO case_evidence (case_id, slot_name) SELECT $1, * FROM UNNEST($2)")
             .bind(case_id)
-            .bind(slot)
+            .bind(&required_slots)
             .execute(&mut *tx)
             .await
             .map_err(|error| db_error_to_response(error, request_id))?;
@@ -573,10 +572,10 @@ async fn create_deceased_estate_sa(
     .await
     .map_err(|error| db_error_to_response(error, request_id))?;
 
-    for slot in &required_slots {
-        sqlx::query("INSERT INTO case_evidence (case_id, slot_name) VALUES ($1, $2)")
+    if !required_slots.is_empty() {
+        sqlx::query("INSERT INTO case_evidence (case_id, slot_name) SELECT $1, * FROM UNNEST($2)")
             .bind(case_id)
-            .bind(slot)
+            .bind(&required_slots)
             .execute(&mut *tx)
             .await
             .map_err(|error| db_error_to_response(error, request_id))?;
@@ -665,10 +664,10 @@ async fn create_popia_incident(
     .await
     .map_err(|error| db_error_to_response(error, request_id))?;
 
-    for slot in &required_slots {
-        sqlx::query("INSERT INTO case_evidence (case_id, slot_name) VALUES ($1, $2)")
+    if !required_slots.is_empty() {
+        sqlx::query("INSERT INTO case_evidence (case_id, slot_name) SELECT $1, * FROM UNNEST($2)")
             .bind(case_id)
-            .bind(slot)
+            .bind(&required_slots)
             .execute(&mut *tx)
             .await
             .map_err(|error| db_error_to_response(error, request_id))?;
@@ -1248,10 +1247,7 @@ async fn export_case(
                     .try_get("directive_document_ids")
                     .map_err(|error| db_error_to_response(error, request_id))?,
                 None => {
-                    return Err(not_found(
-                        Some(request_id),
-                        "emergency_pack case not found",
-                    ));
+                    return Err(not_found(Some(request_id), "emergency_pack case not found"));
                 }
             };
             let slots: Vec<String> = doc_ids.iter().map(|id| id.to_string()).collect();
@@ -1323,10 +1319,7 @@ async fn export_case(
                     .try_get("required_evidence_slots")
                     .map_err(|error| db_error_to_response(error, request_id))?,
                 None => {
-                    return Err(not_found(
-                        Some(request_id),
-                        "popia_incident case not found",
-                    ));
+                    return Err(not_found(Some(request_id), "popia_incident case not found"));
                 }
             };
             ("case_evidence", "case_evidence", slots)
@@ -1385,7 +1378,10 @@ async fn export_case(
     if evidence_table == "__emergency_pack__" {
         // Emergency pack: fetch documents directly from directive_document_ids
         if required_slots.is_empty() {
-            return Err(conflict(Some(request_id), "no directive documents attached"));
+            return Err(conflict(
+                Some(request_id),
+                "no directive documents attached",
+            ));
         }
         for (idx, doc_id_str) in required_slots.iter().enumerate() {
             let document_id = parse_uuid(doc_id_str)
@@ -2215,13 +2211,12 @@ async fn generate_emergency_pack_template(
     manifest_documents: &[ManifestDocument],
     request_id: RequestId,
 ) -> Result<EmergencyPackTemplate, axum::response::Response> {
-    let case_row = sqlx::query(
-        "SELECT emergency_contacts FROM emergency_pack_cases WHERE case_id = $1",
-    )
-    .bind(case_id)
-    .fetch_optional(pool)
-    .await
-    .map_err(|error| db_error_to_response(error, request_id))?;
+    let case_row =
+        sqlx::query("SELECT emergency_contacts FROM emergency_pack_cases WHERE case_id = $1")
+            .bind(case_id)
+            .fetch_optional(pool)
+            .await
+            .map_err(|error| db_error_to_response(error, request_id))?;
 
     let case_row = match case_row {
         Some(row) => row,
@@ -2264,14 +2259,23 @@ fn generate_emergency_pack_instructions(template: &EmergencyPackTemplate) -> Str
 
     md.push_str("## Documents Included\n\n");
     for doc in &template.directive_documents {
-        md.push_str(&format!("- **{}**: {} ({})\n", doc.slot_name, doc.title, doc.document_type));
+        md.push_str(&format!(
+            "- **{}**: {} ({})\n",
+            doc.slot_name, doc.title, doc.document_type
+        ));
     }
     md.push('\n');
 
     md.push_str("## Emergency Contacts\n\n");
     for contact in &template.emergency_contacts {
-        let name = contact.get("name").and_then(|v| v.as_str()).unwrap_or("Unknown");
-        let phone = contact.get("phone_e164").and_then(|v| v.as_str()).unwrap_or("-");
+        let name = contact
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Unknown");
+        let phone = contact
+            .get("phone_e164")
+            .and_then(|v| v.as_str())
+            .unwrap_or("-");
         md.push_str(&format!("- **{}**: {}\n", name, phone));
     }
     md.push('\n');
@@ -2546,13 +2550,19 @@ fn generate_death_readiness_instructions(template: &DeathReadinessTemplate) -> S
     md.push_str("> **IMPORTANT:** This pack does not constitute legal advice.\n");
     md.push_str("> The \"Executor nominee\" referenced below is a nominated person who has NOT yet been legally appointed by the Master of the High Court.\n\n");
     md.push_str("## Executor Nominee\n\n");
-    md.push_str(&format!("- Person ID: `{}`\n\n", template.executor_nominee_person_id));
+    md.push_str(&format!(
+        "- Person ID: `{}`\n\n",
+        template.executor_nominee_person_id
+    ));
     md.push_str("## Asset Map\n\n");
     if template.asset_documents.is_empty() {
         md.push_str("No asset documents attached.\n\n");
     } else {
         for doc in &template.asset_documents {
-            md.push_str(&format!("- {} ({}): `{}`\n", doc.title, doc.document_type, doc.document_id));
+            md.push_str(&format!(
+                "- {} ({}): `{}`\n",
+                doc.title, doc.document_type, doc.document_id
+            ));
         }
         md.push('\n');
     }
@@ -2561,7 +2571,10 @@ fn generate_death_readiness_instructions(template: &DeathReadinessTemplate) -> S
         md.push_str("No contact documents attached.\n\n");
     } else {
         for doc in &template.contact_documents {
-            md.push_str(&format!("- {} ({}): `{}`\n", doc.title, doc.document_type, doc.document_id));
+            md.push_str(&format!(
+                "- {} ({}): `{}`\n",
+                doc.title, doc.document_type, doc.document_id
+            ));
         }
         md.push('\n');
     }
@@ -2690,13 +2703,14 @@ fn resolve_blob_ref(blob_ref: &str, storage_dir: &std::path::Path) -> Option<Pat
     // Prevent path traversal: resolved path must be within storage_dir.
     if let (Ok(canonical_storage), Ok(canonical_resolved)) =
         (storage_dir.canonicalize(), resolved.canonicalize())
-        && !canonical_resolved.starts_with(&canonical_storage) {
-            tracing::warn!(
-                blob_ref = blob_ref,
-                "resolve_blob_ref rejected: path escapes storage directory"
-            );
-            return None;
-        }
+        && !canonical_resolved.starts_with(&canonical_storage)
+    {
+        tracing::warn!(
+            blob_ref = blob_ref,
+            "resolve_blob_ref rejected: path escapes storage directory"
+        );
+        return None;
+    }
 
     Some(resolved)
 }
@@ -2745,8 +2759,7 @@ fn create_zip(
         }
     }
 
-    zip.finish()
-        .map_err(std::io::Error::other)?;
+    zip.finish().map_err(std::io::Error::other)?;
     Ok(())
 }
 
@@ -2994,24 +3007,30 @@ mod tests {
         assert_eq!(relative, base.join("blob.bin"));
 
         // file:// inside storage_dir
-        let file_inside = resolve_blob_ref(
-            &format!("file://{}", inner_file.display()),
-            &base,
-        )
-        .unwrap();
+        let file_inside =
+            resolve_blob_ref(&format!("file://{}", inner_file.display()), &base).unwrap();
         assert_eq!(file_inside, inner_file);
 
         // Absolute path outside storage_dir should be rejected
         let outside = resolve_blob_ref("/etc/passwd", &base);
-        assert!(outside.is_none(), "path outside storage_dir must be rejected");
+        assert!(
+            outside.is_none(),
+            "path outside storage_dir must be rejected"
+        );
 
         // file:// path outside storage_dir should be rejected
         let file_outside = resolve_blob_ref("file:///etc/passwd", &base);
-        assert!(file_outside.is_none(), "file:// outside storage_dir must be rejected");
+        assert!(
+            file_outside.is_none(),
+            "file:// outside storage_dir must be rejected"
+        );
 
         // Traversal via ../ should be rejected when target escapes
         let traversal = resolve_blob_ref("../../../etc/passwd", &base);
-        assert!(traversal.is_none(), "traversal outside storage_dir must be rejected");
+        assert!(
+            traversal.is_none(),
+            "traversal outside storage_dir must be rejected"
+        );
     }
 
     #[test]
@@ -4201,11 +4220,20 @@ mod tests {
 
     #[test]
     fn allowed_transitions_mhca39_full_workflow() {
-        assert_eq!(allowed_transitions("mhca39", "blocked"), &["evidence_collecting"]);
+        assert_eq!(
+            allowed_transitions("mhca39", "blocked"),
+            &["evidence_collecting"]
+        );
         assert!(allowed_transitions("mhca39", "evidence_collecting").contains(&"draft_generated"));
         assert!(allowed_transitions("mhca39", "evidence_collecting").contains(&"blocked"));
-        assert_eq!(allowed_transitions("mhca39", "draft_generated"), &["awaiting_oath"]);
-        assert_eq!(allowed_transitions("mhca39", "awaiting_oath"), &["exported"]);
+        assert_eq!(
+            allowed_transitions("mhca39", "draft_generated"),
+            &["awaiting_oath"]
+        );
+        assert_eq!(
+            allowed_transitions("mhca39", "awaiting_oath"),
+            &["exported"]
+        );
         assert_eq!(allowed_transitions("mhca39", "exported"), &["closed"]);
     }
 
@@ -4219,17 +4247,33 @@ mod tests {
 
     #[test]
     fn allowed_transitions_deceased_estate_workflow() {
-        assert_eq!(allowed_transitions("deceased_estate_reporting_sa", "blocked"), &["ready"]);
-        assert_eq!(allowed_transitions("deceased_estate_reporting_sa", "ready"), &["exported"]);
-        assert!(allowed_transitions("deceased_estate_reporting_sa", "exported").contains(&"accessed"));
-        assert!(allowed_transitions("deceased_estate_reporting_sa", "exported").contains(&"revoked"));
+        assert_eq!(
+            allowed_transitions("deceased_estate_reporting_sa", "blocked"),
+            &["ready"]
+        );
+        assert_eq!(
+            allowed_transitions("deceased_estate_reporting_sa", "ready"),
+            &["exported"]
+        );
+        assert!(
+            allowed_transitions("deceased_estate_reporting_sa", "exported").contains(&"accessed")
+        );
+        assert!(
+            allowed_transitions("deceased_estate_reporting_sa", "exported").contains(&"revoked")
+        );
     }
 
     #[test]
     fn allowed_transitions_popia_incident_workflow() {
         assert_eq!(allowed_transitions("popia_incident", "draft"), &["ready"]);
-        assert_eq!(allowed_transitions("popia_incident", "ready"), &["exported"]);
-        assert_eq!(allowed_transitions("popia_incident", "exported"), &["closed"]);
+        assert_eq!(
+            allowed_transitions("popia_incident", "ready"),
+            &["exported"]
+        );
+        assert_eq!(
+            allowed_transitions("popia_incident", "exported"),
+            &["closed"]
+        );
     }
 
     #[test]
@@ -4917,8 +4961,14 @@ mod tests {
     #[test]
     fn allowed_transitions_death_readiness_full_workflow() {
         assert_eq!(allowed_transitions("death_readiness", "draft"), &["ready"]);
-        assert_eq!(allowed_transitions("death_readiness", "ready"), &["exported"]);
-        assert_eq!(allowed_transitions("death_readiness", "exported"), &["closed"]);
+        assert_eq!(
+            allowed_transitions("death_readiness", "ready"),
+            &["exported"]
+        );
+        assert_eq!(
+            allowed_transitions("death_readiness", "exported"),
+            &["closed"]
+        );
     }
 
     // === Tier gating / IDOR negative tests ===

@@ -1,0 +1,13 @@
+[advisories]
+ignore = [
+    "RUSTSEC-2023-0071",
+]
+
+[licenses]
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "Unicode-3.0",
+    "Zlib",
+]
