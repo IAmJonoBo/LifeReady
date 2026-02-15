@@ -157,9 +157,13 @@ impl AuditClient for InMemoryAuditSink {
     }
 }
 
-/// Returns a 64-character string of zeros, used as the initial hash for audit chains.
+/// A 64-character string of zeros, used as the initial hash for audit chains.
+pub const ZERO_HASH: &str =
+    "0000000000000000000000000000000000000000000000000000000000000000";
+
+/// Returns an owned `String` containing `ZERO_HASH`.
 pub fn zero_hash() -> String {
-    "0".repeat(64)
+    ZERO_HASH.to_string()
 }
 
 #[cfg(test)]
