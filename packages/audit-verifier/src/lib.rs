@@ -1,5 +1,6 @@
 use lifeready_audit::zero_hash;
 use serde::{Deserialize, Serialize};
+use lifeready_audit::zero_hash;
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 use std::fs;

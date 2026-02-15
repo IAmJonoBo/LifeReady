@@ -33,13 +33,14 @@ pub enum LifereadyEnv {
 impl LifereadyEnv {
     pub fn from_env() -> Self {
         match std::env::var("LIFEREADY_ENV")
-            .unwrap_or_else(|_| "dev".into())
+            .unwrap_or_else(|_| "production".into())
             .to_lowercase()
             .as_str()
         {
             "production" | "prod" => Self::Production,
             "test" => Self::Test,
-            _ => Self::Dev,
+            "dev" | "development" => Self::Dev,
+            _ => Self::Production,
         }
     }
 }
@@ -167,7 +168,7 @@ impl AuthConfig {
     /// Load configuration from environment with production guardrails.
     ///
     /// Rules:
-    /// - LIFEREADY_ENV defaults to "dev".
+    /// - LIFEREADY_ENV defaults to "production" (secure by default).
     /// - In production, JWT_SECRET must be set, must not equal the dev fallback,
     ///   and must be at least 32 characters.
     /// - In dev/test, if JWT_SECRET is missing, a dev-only fallback is used with a loud warning.
@@ -1071,5 +1072,26 @@ mod tests {
                 assert_eq!(decoded.sub, "user");
             },
         );
+    }
+
+    #[test]
+    fn lifeready_env_defaults_to_production() {
+        with_env(&[("LIFEREADY_ENV", None)], || {
+            assert_eq!(LifereadyEnv::from_env(), LifereadyEnv::Production);
+        });
+    }
+
+    #[test]
+    fn lifeready_env_defaults_to_production_on_invalid_value() {
+        with_env(&[("LIFEREADY_ENV", Some("unknown"))], || {
+            assert_eq!(LifereadyEnv::from_env(), LifereadyEnv::Production);
+        });
+    }
+
+    #[test]
+    fn lifeready_env_recognizes_development() {
+        with_env(&[("LIFEREADY_ENV", Some("development"))], || {
+            assert_eq!(LifereadyEnv::from_env(), LifereadyEnv::Dev);
+        });
     }
 }
