@@ -157,6 +157,11 @@ impl AuditClient for InMemoryAuditSink {
     }
 }
 
+/// Returns a 64-character string of zeros, used as the initial hash for audit chains.
+pub fn zero_hash() -> String {
+    "0".repeat(64)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -197,5 +202,12 @@ mod tests {
         assert!(events[0].action.starts_with("auth.denied:"));
         let payload = &events[0].payload;
         assert_eq!(payload["reason"], "insufficient_role");
+    }
+
+    #[test]
+    fn zero_hash_is_64_zeros() {
+        let h = zero_hash();
+        assert_eq!(h.len(), 64);
+        assert!(h.chars().all(|c| c == '0'));
     }
 }

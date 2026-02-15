@@ -5,6 +5,7 @@ use axum::{
     http::{header, Request, StatusCode},
 };
 use http_body_util::BodyExt;
+use lifeready_audit::zero_hash;
 use lifeready_auth::{AccessLevel, AuthConfig, Claims, Role, SensitivityTier};
 use sqlx::PgPool;
 use std::future::Future;
@@ -411,7 +412,7 @@ async fn export_returns_head_hash() {
         let head_hash = value.get("head_hash").and_then(|v| v.as_str()).unwrap();
         let events_sha = value.get("events_sha256").and_then(|v| v.as_str()).unwrap();
         let download_url = value.get("download_url").and_then(|v| v.as_str()).unwrap();
-        assert_eq!(head_hash, &"0".repeat(64));
+        assert_eq!(head_hash, zero_hash());
         assert_eq!(head_hash.len(), 64);
         assert_eq!(events_sha.len(), 64);
 

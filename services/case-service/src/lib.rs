@@ -9,6 +9,7 @@ use lifeready_auth::{
     AuthConfig, AuthLayer, RequestContext, RequestId, conflict, invalid_request, not_found,
     request_id_middleware,
 };
+use lifeready_audit::zero_hash;
 use lifeready_policy::{
     Role, SensitivityTier, TierRequirement, require_role, require_scope, require_scope_any,
     require_tier,
@@ -2748,10 +2749,6 @@ fn create_zip(
     zip.finish()
         .map_err(std::io::Error::other)?;
     Ok(())
-}
-
-fn zero_hash() -> String {
-    "0".repeat(64)
 }
 
 async fn ensure_case_access(

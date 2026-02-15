@@ -9,6 +9,7 @@ use lifeready_auth::{
     conflict, invalid_request, request_id_middleware, AuthConfig, AuthLayer, RequestContext,
     RequestId,
 };
+use lifeready_audit::zero_hash;
 use lifeready_policy::{
     require_role, require_scope, require_tier, Role, SensitivityTier, TierRequirement,
 };
@@ -178,10 +179,6 @@ fn canonicalize_value(value: &Value) -> Value {
         Value::Array(items) => Value::Array(items.iter().map(canonicalize_value).collect()),
         _ => value.clone(),
     }
-}
-
-pub fn zero_hash() -> String {
-    "0".repeat(64)
 }
 
 async fn append_audit_event(
