@@ -1,51 +1,39 @@
 # Project Overview
 
-This is a Rust-based monorepo for the LifeReady SA project, a "servant software" platform for preparing and executing incapacity and death-readiness workflows. The backend is built with Rust and Axum, and the frontend is a Flutter application. The project is "contract-first", meaning that the OpenAPI 3.1 contracts are the source of truth, and Rust Axum stubs are generated from them.
+This is a Rust-based monorepo for the LifeReady SA project, a "servant software" platform for preparing
+and executing incapacity and death-readiness workflows. The backend is built with Rust and Axum, and
+the frontend is a Flutter application. The project is "contract-first", meaning that the OpenAPI 3.1
+contracts are the source of truth, and Rust Axum stubs are generated from them.
 
-The repository contains several services, including `identity-service`, `estate-service`, `vault-service`, `case-service`, and `audit-service`. It also includes a Flutter application and various packages for shared functionality.
+The repository contains several services, including `identity-service`, `estate-service`, `vault-service`,
+`case-service`, and `audit-service`. It also includes a Flutter application and various packages for
+shared functionality.
 
 ## Building and Running
 
 The project uses `make` to simplify the build and run process. Here are the key commands:
 
-- **Install dependencies:**
-  - OpenAPI tooling: `npm install --prefix tools/openapi`
-  - Rust dependencies: `cargo build` (implicitly fetched on build)
-  - Flutter dependencies: `flutter pub get` (inside `apps/lifeready_flutter`)
+- `make validate-openapi`: Validates all OpenAPI specifications.
+- `make generate-axum`: Generates Rust Axum stubs from the OpenAPI contracts.
+- `make dev-up`: Starts the local development environment using Docker Compose.
+- `make db-migrate`: Runs the database migrations for all services.
+- `make generate-flutter-tokens`: Regenerates Flutter tokens from DTCG JSON.
+- `make flutter-check`: Runs tokens, analysis, and tests for the Flutter application.
 
-- **Validate contracts and generate stubs:**
-  - `make validate-openapi`
-  - `make generate-axum`
+## Core Concepts
 
-- **Start the local development environment:**
-  - `make dev-up` (starts a PostgreSQL container)
+- **RBAC**: Role-based access control is implemented throughout the services.
+- **Sensitivity Tiers**: Data is classified into `green`, `amber`, and `red` tiers, with different access
+  requirements.
+- **Audit Chain**: All critical actions are recorded in an append-only, hash-chained audit trail.
+- **Packs**: Guided evidence packs for different workflows (e.g., MHCA 39, Will Prep).
 
-- **Run database migrations:**
-  - `make db-migrate`
+## Development Rules
 
-- **Run the services:**
-  - `cargo run -p identity_service`
-  - `cargo run -p estate_service`
-  - `cargo run -p vault_service`
-  - `cargo run -p case_service`
-  - `cargo run -p audit_service`
+- **Contract-First**: Always update the OpenAPI specs before modifying generated code.
+- **Security-First**: Default to restrictive permissions.
+- **Audit Everything**: Ensure all state-changing operations are logged to the audit service.
 
-- **Run the Flutter app:**
-  - `make generate-flutter-tokens`
-  - `flutter run` (inside `apps/lifeready_flutter`)
+---
 
-- **Run tests:**
-  - Rust: `cargo test --workspace --all-targets --all-features`
-  - Flutter: `flutter test` (inside `apps/lifeready_flutter`)
-
-- **Linting:**
-  - Rust: `cargo fmt -- --check` and `cargo clippy --workspace --all-targets --all-features`
-  - Markdown: `make lint-docs`
-  - Flutter: `flutter analyze`
-
-## Development Conventions
-
-- **Contract-first:** Always update the OpenAPI specs first, then run `make generate-axum`. Do not edit the generated code in `services/*/generated` by hand.
-- **Drift prevention:** The CI pipeline will fail if there is a diff in the generated code. Make sure to commit the generated code.
-- **Testing:** All code should be tested. The CI pipeline runs `cargo test` and `flutter test`.
-- **Pull Requests:** Keep pull requests small and focused. Ensure that CI is passing before requesting a review.
+*Note: This project is in Phase 3 of development.*
