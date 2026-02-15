@@ -1,6 +1,6 @@
 use axum::{
     body::Body,
-    http::{header, Request, StatusCode},
+    http::{Request, StatusCode, header},
 };
 use http_body_util::BodyExt;
 use lifeready_auth::{AccessLevel, AuthConfig, Claims, Role, SensitivityTier};
@@ -141,10 +141,12 @@ async fn verify_mfa_issues_token() {
     assert_eq!(res.status(), StatusCode::OK);
     let body = res.into_body().collect().await.unwrap().to_bytes();
     let payload: Value = serde_json::from_slice(&body).unwrap();
-    assert!(payload
-        .get("access_token")
-        .and_then(|v| v.as_str())
-        .is_some());
+    assert!(
+        payload
+            .get("access_token")
+            .and_then(|v| v.as_str())
+            .is_some()
+    );
 }
 
 #[tokio::test]

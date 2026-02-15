@@ -1,13 +1,13 @@
 use axum::{
+    Json,
     body::Body,
     extract::FromRequestParts,
-    http::{header, HeaderMap, HeaderValue, Request, StatusCode},
+    http::{HeaderMap, HeaderValue, Request, StatusCode, header},
     middleware::Next,
     response::{IntoResponse, Response},
-    Json,
 };
 use chrono::{Duration, TimeZone, Utc};
-use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
+use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::{
@@ -181,12 +181,11 @@ impl AuthConfig {
         let is_dev_fallback = secret == DEV_FALLBACK_SECRET;
         let is_too_short = secret.len() < MIN_JWT_SECRET_LEN;
 
-        if env == LifereadyEnv::Production
-            && (is_missing || is_dev_fallback || is_too_short) {
-                return Err(AuthError::misconfigured(
-                    "Production mode requires JWT_SECRET (>= 32 chars) and it must not be the dev fallback",
-                ));
-            }
+        if env == LifereadyEnv::Production && (is_missing || is_dev_fallback || is_too_short) {
+            return Err(AuthError::misconfigured(
+                "Production mode requires JWT_SECRET (>= 32 chars) and it must not be the dev fallback",
+            ));
+        }
 
         let secret = if is_missing {
             tracing::warn!("JWT_SECRET not set; using dev-only fallback secret (dev/test only)");
@@ -198,14 +197,16 @@ impl AuthConfig {
         let mut config = Self::new(secret);
 
         if let Ok(issuer) = std::env::var("JWT_ISSUER")
-            && !issuer.trim().is_empty() {
-                config = config.with_issuer(issuer);
-            }
+            && !issuer.trim().is_empty()
+        {
+            config = config.with_issuer(issuer);
+        }
 
         if let Ok(audience) = std::env::var("JWT_AUDIENCE")
-            && !audience.trim().is_empty() {
-                config = config.with_audience(audience);
-            }
+            && !audience.trim().is_empty()
+        {
+            config = config.with_audience(audience);
+        }
 
         Ok(config)
     }
@@ -670,10 +671,10 @@ pub fn ok_response<T: Serialize>(payload: T) -> Response {
 mod tests {
     use super::*;
     use axum::{
-        body::Body,
-        http::{header, Request, StatusCode},
-        routing::get,
         Router,
+        body::Body,
+        http::{Request, StatusCode, header},
+        routing::get,
     };
     use std::sync::Mutex;
     use tower::ServiceExt;

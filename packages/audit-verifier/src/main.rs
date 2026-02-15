@@ -32,8 +32,6 @@ enum Command {
 }
 
 fn run(args: Args) -> Result<(), String> {
-    
-
     match args.command {
         Command::VerifyAudit { input, head_hash } => {
             verify_audit_chain(&input, head_hash.as_deref()).map(|head| {

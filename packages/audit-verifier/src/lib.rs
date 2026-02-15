@@ -1,3 +1,4 @@
+use lifeready_audit::zero_hash;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
@@ -48,7 +49,7 @@ pub fn verify_audit_chain(input: &Path, expected_head: Option<&str>) -> Result<S
         .map_err(|error| format!("Failed to open {}: {error}", input.display()))?;
     let reader = BufReader::new(file);
 
-    let mut prev_hash = "0".repeat(64);
+    let mut prev_hash = zero_hash();
     let mut last_hash = prev_hash.clone();
 
     for (idx, line) in reader.lines().enumerate() {
@@ -76,11 +77,12 @@ pub fn verify_audit_chain(input: &Path, expected_head: Option<&str>) -> Result<S
     }
 
     if let Some(expected) = expected_head
-        && expected != last_hash {
-            return Err(format!(
-                "Head hash mismatch: expected {expected}, got {last_hash}"
-            ));
-        }
+        && expected != last_hash
+    {
+        return Err(format!(
+            "Head hash mismatch: expected {expected}, got {last_hash}"
+        ));
+    }
 
     Ok(last_hash)
 }
@@ -229,7 +231,7 @@ mod tests {
         let mut event = AuditEvent {
             event_id: "event-1".into(),
             created_at: "2025-01-01T00:00:00Z".into(),
-            prev_hash: "0".repeat(64),
+            prev_hash: zero_hash(),
             event_hash: "".into(),
             event: AuditAppend {
                 actor_principal_id: "actor".into(),
@@ -255,7 +257,7 @@ mod tests {
         let mut event = AuditEvent {
             event_id: "event-1".into(),
             created_at: "2025-01-01T00:00:00Z".into(),
-            prev_hash: "0".repeat(64),
+            prev_hash: zero_hash(),
             event_hash: "".into(),
             event: AuditAppend {
                 actor_principal_id: "actor".into(),
@@ -287,7 +289,7 @@ mod tests {
         let mut event = AuditEvent {
             event_id: "event-1".into(),
             created_at: "2025-01-01T00:00:00Z".into(),
-            prev_hash: "0".repeat(64),
+            prev_hash: zero_hash(),
             event_hash: "".into(),
             event: AuditAppend {
                 actor_principal_id: "actor".into(),
@@ -325,7 +327,7 @@ mod tests {
 
     fn build_chain(count: usize) -> Vec<AuditEvent> {
         let mut events = Vec::new();
-        let mut prev = "0".repeat(64);
+        let mut prev = zero_hash();
         for i in 0..count {
             let mut event = AuditEvent {
                 event_id: format!("event-{i}"),
@@ -348,7 +350,10 @@ mod tests {
     }
 
     fn write_chain(path: &Path, events: &[AuditEvent]) {
-        let lines: Vec<String> = events.iter().map(|e| serde_json::to_string(e).unwrap()).collect();
+        let lines: Vec<String> = events
+            .iter()
+            .map(|e| serde_json::to_string(e).unwrap())
+            .collect();
         fs::write(path, lines.join("\n") + "\n").unwrap();
     }
 
