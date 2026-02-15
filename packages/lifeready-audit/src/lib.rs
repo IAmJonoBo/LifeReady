@@ -63,16 +63,9 @@ impl AuditError {
     }
 }
 
-/// Trait for audit event recording
-///
-/// This trait defines the interface for emitting audit events.
-/// Services can use this to record auth decisions, access denied events,
-/// and other auditable actions without direct network coupling.
 pub trait AuditClient: Send + Sync {
-    /// Record an audit event
     fn record(&self, event: AuditEvent) -> AuditResult<()>;
 
-    /// Record an auth decision (access granted/denied)
     fn record_auth_decision(
         &self,
         actor_principal_id: &str,
@@ -101,7 +94,6 @@ pub trait AuditClient: Send + Sync {
         self.record(event)
     }
 
-    /// Record an access denied event
     fn record_access_denied(
         &self,
         actor_principal_id: &str,
@@ -120,7 +112,6 @@ pub trait AuditClient: Send + Sync {
     }
 }
 
-/// No-op implementation of AuditClient for use in tests or when audit is disabled
 #[derive(Clone, Default)]
 pub struct NoopAuditClient;
 
@@ -150,20 +141,15 @@ impl InMemoryAuditSink {
     }
 }
 
+pub fn zero_hash() -> String {
+    "0".repeat(64)
+}
+
 impl AuditClient for InMemoryAuditSink {
     fn record(&self, event: AuditEvent) -> AuditResult<()> {
         InMemoryAuditSink::record(self, event);
         Ok(())
     }
-}
-
-/// A 64-character string of zeros, used as the initial hash for audit chains.
-pub const ZERO_HASH: &str =
-    "0000000000000000000000000000000000000000000000000000000000000000";
-
-/// Returns an owned `String` containing `ZERO_HASH`.
-pub fn zero_hash() -> String {
-    ZERO_HASH.to_string()
 }
 
 #[cfg(test)]

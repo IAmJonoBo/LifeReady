@@ -5,7 +5,6 @@ use axum::{
     http::{Request, StatusCode},
 };
 use http_body_util::BodyExt;
-use lifeready_audit::zero_hash;
 use lifeready_auth::{AccessLevel, AuthConfig, Claims, Role, SensitivityTier};
 use sha2::Digest;
 use sqlx::{PgPool, Row};
@@ -1091,7 +1090,7 @@ async fn export_case_includes_audit_events() {
     .bind("green")
     .bind(Uuid::parse_str(case_id).unwrap())
     .bind(serde_json::json!({"ok": true}))
-    .bind(zero_hash())
+    .bind("0".repeat(64))
     .bind(&audit_hash)
     .execute(&pool)
     .await
