@@ -14,7 +14,7 @@ jobs:
     steps:
       - uses: amannn/action-semantic-pull-request@v6
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          githubToken: ${{ secrets.GITHUB_TOKEN }}
           types: |
             feat
             fix
