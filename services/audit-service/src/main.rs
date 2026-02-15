@@ -1,6 +1,6 @@
 use audit_service::{addr_from_env, app};
 use axum::Router;
-use std::future::{pending, Future};
+use std::future::{Future, pending};
 use tokio::net::TcpListener;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};

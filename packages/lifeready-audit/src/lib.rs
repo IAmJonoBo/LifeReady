@@ -164,7 +164,14 @@ mod tests {
     #[test]
     fn noop_audit_client_accepts_events() {
         let client = NoopAuditClient;
-        let event = AuditEvent::new("actor", "action", "green", None, None, serde_json::json!({}));
+        let event = AuditEvent::new(
+            "actor",
+            "action",
+            "green",
+            None,
+            None,
+            serde_json::json!({}),
+        );
         assert!(client.record(event).is_ok());
     }
 
@@ -172,7 +179,14 @@ mod tests {
     fn in_memory_sink_implements_audit_client() {
         let sink = InMemoryAuditSink::default();
         let client: &dyn AuditClient = &sink;
-        let event = AuditEvent::new("actor", "action", "green", None, None, serde_json::json!({}));
+        let event = AuditEvent::new(
+            "actor",
+            "action",
+            "green",
+            None,
+            None,
+            serde_json::json!({}),
+        );
         assert!(client.record(event).is_ok());
         assert_eq!(sink.snapshot().len(), 1);
     }

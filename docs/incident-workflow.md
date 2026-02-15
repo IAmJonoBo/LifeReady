@@ -187,6 +187,7 @@ draft ──► ready ──► exported ──► closed
 ```
 
 Each transition is:
+
 - Validated against the POPIA incident state machine in `allowed_transitions()`
 - Recorded in the `case_transitions` table with actor, timestamp, and reason
 - Immutably logged in the audit trail
