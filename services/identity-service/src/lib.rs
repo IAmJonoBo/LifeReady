@@ -1,16 +1,16 @@
 use axum::{
-    Json, Router,
     extract::{Extension, State},
     http::StatusCode,
     routing::{get, post},
+    Json, Router,
 };
 use chrono::{Duration as ChronoDuration, Utc};
 use lifeready_audit::{AuditEvent, InMemoryAuditSink};
 use lifeready_auth::{
-    AccessLevel, AuthConfig, AuthLayer, Claims, RequestContext, RequestId, Role, SensitivityTier,
-    invalid_request, request_id_middleware,
+    invalid_request, request_id_middleware, AccessLevel, AuthConfig, AuthLayer, Claims,
+    RequestContext, RequestId, Role, SensitivityTier,
 };
-use lifeready_policy::{TierRequirement, require_role, require_scope, require_tier};
+use lifeready_policy::{require_role, require_scope, require_tier, TierRequirement};
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::sync::Arc;

@@ -1,6 +1,6 @@
 use axum::{
     body::Body,
-    http::{Request, StatusCode, header},
+    http::{header, Request, StatusCode},
 };
 use http_body_util::BodyExt;
 use lifeready_auth::{AccessLevel, AuthConfig, Claims, Role, SensitivityTier};

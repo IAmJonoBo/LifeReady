@@ -3,20 +3,20 @@
 
 use async_trait::async_trait;
 use axum::{
-    Json, Router,
     body::Body,
     extract::{Extension, Path, Query, State},
-    http::{StatusCode, header},
+    http::{header, StatusCode},
     response::IntoResponse,
     routing::{get, post},
+    Json, Router,
 };
 use chrono::Utc;
 use lifeready_auth::{
-    AuthConfig, AuthLayer, RequestContext, RequestId, conflict, invalid_request, not_found,
-    request_id_middleware,
+    conflict, invalid_request, not_found, request_id_middleware, AuthConfig, AuthLayer,
+    RequestContext, RequestId,
 };
 use lifeready_policy::{
-    Role, SensitivityTier, TierRequirement, require_role, require_scope, require_tier,
+    require_role, require_scope, require_tier, Role, SensitivityTier, TierRequirement,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -155,10 +155,7 @@ pub fn router() -> Router {
             get(list_versions).post(commit_document),
         )
         .route("/v1/documents/{document_id}", get(get_document))
-        .route(
-            "/v1/documents/{document_id}/download",
-            get(download_document),
-        )
+        .route("/v1/documents/{document_id}/download", get(download_document))
         .with_state(state)
         .layer(AuthLayer::new(auth_config))
         .layer(axum::middleware::from_fn(request_id_middleware))
@@ -851,17 +848,16 @@ fn normalize_blob_ref(
     // Prevent path traversal: resolved path must be within storage_dir.
     if let (Ok(canonical_storage), Ok(canonical_resolved)) =
         (storage_dir.canonicalize(), resolved.canonicalize())
-        && !canonical_resolved.starts_with(&canonical_storage)
-    {
-        tracing::warn!(
-            blob_ref = blob_ref,
-            "normalize_blob_ref rejected: path escapes storage directory"
-        );
-        return Err(invalid_request(
-            Some(request_id),
-            "blob_ref outside storage directory",
-        ));
-    }
+        && !canonical_resolved.starts_with(&canonical_storage) {
+            tracing::warn!(
+                blob_ref = blob_ref,
+                "normalize_blob_ref rejected: path escapes storage directory"
+            );
+            return Err(invalid_request(
+                Some(request_id),
+                "blob_ref outside storage directory",
+            ));
+        }
 
     Ok(candidate)
 }

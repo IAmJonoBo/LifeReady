@@ -150,16 +150,16 @@ impl InMemoryAuditSink {
     }
 }
 
+/// Returns a 64-character string of zeros, used as the initial hash for audit chains.
+pub fn zero_hash() -> String {
+    "0".repeat(64)
+}
+
 impl AuditClient for InMemoryAuditSink {
     fn record(&self, event: AuditEvent) -> AuditResult<()> {
         InMemoryAuditSink::record(self, event);
         Ok(())
     }
-}
-
-/// Returns a 64-character string of zeros, used as the initial hash for audit chains.
-pub fn zero_hash() -> String {
-    "0".repeat(64)
 }
 
 #[cfg(test)]

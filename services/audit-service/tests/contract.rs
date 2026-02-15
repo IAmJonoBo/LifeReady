@@ -5,7 +5,6 @@ use axum::{
     http::{Request, StatusCode, header},
 };
 use http_body_util::BodyExt;
-use lifeready_audit::zero_hash;
 use lifeready_auth::{AccessLevel, AuthConfig, Claims, Role, SensitivityTier};
 use sqlx::PgPool;
 use std::future::Future;
@@ -19,7 +18,7 @@ fn init_env() {
     static INIT: Once = Once::new();
     INIT.call_once(|| unsafe {
         std::env::set_var("LIFEREADY_ENV", "dev");
-        std::env::set_var("JWT_SECRET", "test-secret-32-chars-minimum!!!");
+        std::env::set_var("JWT_SECRET", "test-secret-32-chars-minimum!!");
     });
 }
 
@@ -145,7 +144,7 @@ async fn append_event_returns_database_unavailable_without_pool() {
 async fn append_event_returns_hashes() {
     init_env();
     unsafe {
-        std::env::set_var("JWT_SECRET", "test-secret-32-chars-minimum!!!");
+        std::env::set_var("JWT_SECRET", "test-secret");
     }
     let pool = match setup_db().await {
         Some(pool) => pool,
@@ -198,7 +197,7 @@ async fn append_event_returns_hashes() {
 async fn append_event_rejects_invalid_tier() {
     init_env();
     unsafe {
-        std::env::set_var("JWT_SECRET", "test-secret-32-chars-minimum!!!");
+        std::env::set_var("JWT_SECRET", "test-secret");
     }
     let pool = match setup_db().await {
         Some(pool) => pool,
@@ -238,7 +237,7 @@ async fn append_event_rejects_invalid_tier() {
 async fn append_event_rejects_invalid_actor_id() {
     init_env();
     unsafe {
-        std::env::set_var("JWT_SECRET", "test-secret-32-chars-minimum!!!");
+        std::env::set_var("JWT_SECRET", "test-secret");
     }
     let pool = match setup_db().await {
         Some(pool) => pool,
@@ -278,7 +277,7 @@ async fn append_event_rejects_invalid_actor_id() {
 async fn append_event_rejects_invalid_case_id() {
     init_env();
     unsafe {
-        std::env::set_var("JWT_SECRET", "test-secret-32-chars-minimum!!!");
+        std::env::set_var("JWT_SECRET", "test-secret");
     }
     let pool = match setup_db().await {
         Some(pool) => pool,
@@ -318,7 +317,7 @@ async fn append_event_rejects_invalid_case_id() {
 async fn append_event_allows_missing_case_id() {
     init_env();
     unsafe {
-        std::env::set_var("JWT_SECRET", "test-secret-32-chars-minimum!!!");
+        std::env::set_var("JWT_SECRET", "test-secret");
     }
     let pool = match setup_db().await {
         Some(pool) => pool,
@@ -358,7 +357,7 @@ async fn append_event_allows_missing_case_id() {
 async fn export_returns_database_unavailable_without_pool() {
     init_env();
     unsafe {
-        std::env::set_var("JWT_SECRET", "test-secret-32-chars-minimum!!!");
+        std::env::set_var("JWT_SECRET", "test-secret");
     }
     with_env_async(&[("DATABASE_URL", None)], || async {
         let app = audit_service::app();
@@ -412,7 +411,7 @@ async fn export_returns_head_hash() {
         let head_hash = value.get("head_hash").and_then(|v| v.as_str()).unwrap();
         let events_sha = value.get("events_sha256").and_then(|v| v.as_str()).unwrap();
         let download_url = value.get("download_url").and_then(|v| v.as_str()).unwrap();
-        assert_eq!(head_hash, zero_hash());
+        assert_eq!(head_hash, &"0".repeat(64));
         assert_eq!(head_hash.len(), 64);
         assert_eq!(events_sha.len(), 64);
 
@@ -426,7 +425,7 @@ async fn export_returns_head_hash() {
 async fn export_returns_latest_event_hash() {
     init_env();
     unsafe {
-        std::env::set_var("JWT_SECRET", "test-secret-32-chars-minimum!!!");
+        std::env::set_var("JWT_SECRET", "test-secret");
     }
     let pool = match setup_db().await {
         Some(pool) => pool,
@@ -497,7 +496,7 @@ async fn export_returns_latest_event_hash() {
 async fn append_event_sets_prev_hash_from_latest_event() {
     init_env();
     unsafe {
-        std::env::set_var("JWT_SECRET", "test-secret-32-chars-minimum!!!");
+        std::env::set_var("JWT_SECRET", "test-secret");
     }
     let pool = match setup_db().await {
         Some(pool) => pool,
@@ -565,7 +564,7 @@ async fn append_event_sets_prev_hash_from_latest_event() {
 }
 
 fn test_token() -> String {
-    let config = AuthConfig::new("test-secret-32-chars-minimum!!!");
+    let config = AuthConfig::new("test-secret");
     let claims = Claims::new(
         "00000000-0000-0000-0000-000000000001",
         Role::Principal,
@@ -578,7 +577,7 @@ fn test_token() -> String {
 }
 
 fn read_only_token() -> String {
-    let config = AuthConfig::new("test-secret-32-chars-minimum!!!");
+    let config = AuthConfig::new("test-secret");
     let claims = Claims::new(
         "00000000-0000-0000-0000-000000000001",
         Role::Principal,
@@ -594,7 +593,7 @@ fn read_only_token() -> String {
 async fn append_event_rejects_missing_scope() {
     init_env();
     unsafe {
-        std::env::set_var("JWT_SECRET", "test-secret-32-chars-minimum!!!");
+        std::env::set_var("JWT_SECRET", "test-secret");
     }
     let pool = match setup_db().await {
         Some(pool) => pool,
@@ -634,7 +633,7 @@ async fn append_event_rejects_missing_scope() {
 async fn export_rejects_missing_scope() {
     init_env();
     unsafe {
-        std::env::set_var("JWT_SECRET", "test-secret-32-chars-minimum!!!");
+        std::env::set_var("JWT_SECRET", "test-secret");
     }
     let pool = match setup_db().await {
         Some(pool) => pool,
