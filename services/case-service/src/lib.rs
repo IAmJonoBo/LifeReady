@@ -393,10 +393,10 @@ async fn create_mhca39(
     .await
     .map_err(|error| db_error_to_response(error, request_id))?;
 
-    for slot in &required_slots {
-        sqlx::query("INSERT INTO mhca39_evidence (case_id, slot_name) VALUES ($1, $2)")
+    if !required_slots.is_empty() {
+        sqlx::query("INSERT INTO mhca39_evidence (case_id, slot_name) SELECT $1, * FROM UNNEST($2)")
             .bind(case_id)
-            .bind(slot)
+            .bind(&required_slots)
             .execute(&mut *tx)
             .await
             .map_err(|error| db_error_to_response(error, request_id))?;
@@ -481,10 +481,10 @@ async fn create_will_prep_sa(
     .await
     .map_err(|error| db_error_to_response(error, request_id))?;
 
-    for slot in &required_slots {
-        sqlx::query("INSERT INTO case_evidence (case_id, slot_name) VALUES ($1, $2)")
+    if !required_slots.is_empty() {
+        sqlx::query("INSERT INTO case_evidence (case_id, slot_name) SELECT $1, * FROM UNNEST($2)")
             .bind(case_id)
-            .bind(slot)
+            .bind(&required_slots)
             .execute(&mut *tx)
             .await
             .map_err(|error| db_error_to_response(error, request_id))?;
@@ -573,10 +573,10 @@ async fn create_deceased_estate_sa(
     .await
     .map_err(|error| db_error_to_response(error, request_id))?;
 
-    for slot in &required_slots {
-        sqlx::query("INSERT INTO case_evidence (case_id, slot_name) VALUES ($1, $2)")
+    if !required_slots.is_empty() {
+        sqlx::query("INSERT INTO case_evidence (case_id, slot_name) SELECT $1, * FROM UNNEST($2)")
             .bind(case_id)
-            .bind(slot)
+            .bind(&required_slots)
             .execute(&mut *tx)
             .await
             .map_err(|error| db_error_to_response(error, request_id))?;
@@ -665,10 +665,10 @@ async fn create_popia_incident(
     .await
     .map_err(|error| db_error_to_response(error, request_id))?;
 
-    for slot in &required_slots {
-        sqlx::query("INSERT INTO case_evidence (case_id, slot_name) VALUES ($1, $2)")
+    if !required_slots.is_empty() {
+        sqlx::query("INSERT INTO case_evidence (case_id, slot_name) SELECT $1, * FROM UNNEST($2)")
             .bind(case_id)
-            .bind(slot)
+            .bind(&required_slots)
             .execute(&mut *tx)
             .await
             .map_err(|error| db_error_to_response(error, request_id))?;
