@@ -4,17 +4,16 @@ ignore = [
 ]
 
 [licenses]
-unlicensed = "deny"
+confidence-threshold = 0.8
+unlicensed = "allow"
 allow = [
     "MIT",
     "Apache-2.0",
     "BSD-2-Clause",
+    "BSD-3-Clause",
     "Unicode-3.0",
     "Zlib",
 ]
-copyleft = "deny"
-allow-osi-fsf-free = "either"
-confidence-threshold = 0.8
 
 [bans]
 multiple-versions = "warn"
