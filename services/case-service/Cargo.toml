@@ -25,6 +25,7 @@ zip = { version = "7.4", default-features = false, features = ["deflate"] }
 walkdir = "2.5"
 
 [dev-dependencies]
+lifeready-audit.workspace = true
 bytes = "1"
 http-body-util = "0.1"
 tower = { version = "0.5", features = ["util"] }

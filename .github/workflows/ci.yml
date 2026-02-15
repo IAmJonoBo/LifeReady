@@ -79,7 +79,8 @@ jobs:
       - uses: subosito/flutter-action@v2
         if: steps.flutter.outputs.found == 'true'
         with:
-          flutter-version: "stable"
+          channel: "stable"
+          flutter-version: "any"
           cache: true
       - name: Generate Flutter tokens
         if: steps.flutter.outputs.found == 'true'

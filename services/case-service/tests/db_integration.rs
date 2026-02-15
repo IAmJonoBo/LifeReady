@@ -5,6 +5,7 @@ use axum::{
     http::{Request, StatusCode},
 };
 use http_body_util::BodyExt;
+use lifeready_audit::zero_hash;
 use lifeready_auth::{AccessLevel, AuthConfig, Claims, Role, SensitivityTier};
 use sha2::Digest;
 use sqlx::{PgPool, Row};
@@ -1090,7 +1091,7 @@ async fn export_case_includes_audit_events() {
     .bind("green")
     .bind(Uuid::parse_str(case_id).unwrap())
     .bind(serde_json::json!({"ok": true}))
-    .bind("0".repeat(64))
+    .bind(zero_hash())
     .bind(&audit_hash)
     .execute(&pool)
     .await
@@ -1840,13 +1841,12 @@ async fn create_deceased_estate_sa_persists_case() {
     let case_type: String = row.try_get("case_type").unwrap();
     assert_eq!(case_type, "deceased_estate_reporting_sa");
 
-    let row = sqlx::query(
-        "SELECT required_evidence_slots FROM deceased_estate_cases WHERE case_id = $1",
-    )
-    .bind(case_uuid)
-    .fetch_one(&pool)
-    .await
-    .unwrap();
+    let row =
+        sqlx::query("SELECT required_evidence_slots FROM deceased_estate_cases WHERE case_id = $1")
+            .bind(case_uuid)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     let slots: Vec<String> = row.try_get("required_evidence_slots").unwrap();
     assert!(slots.len() >= 7);
     assert!(slots.contains(&"death_certificate".to_string()));
@@ -1897,7 +1897,11 @@ async fn will_prep_sa_attach_and_export() {
     assert_eq!(response.status(), StatusCode::CREATED);
     let body = response.into_body().collect().await.unwrap().to_bytes();
     let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    let case_id = value.get("case_id").and_then(|v| v.as_str()).unwrap().to_string();
+    let case_id = value
+        .get("case_id")
+        .and_then(|v| v.as_str())
+        .unwrap()
+        .to_string();
 
     let document_id = Uuid::new_v4();
     let blob_path = storage_dir.join(format!("{}.bin", document_id));
@@ -2020,7 +2024,11 @@ async fn deceased_estate_sa_attach_and_export() {
     assert_eq!(response.status(), StatusCode::CREATED);
     let body = response.into_body().collect().await.unwrap().to_bytes();
     let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    let case_id = value.get("case_id").and_then(|v| v.as_str()).unwrap().to_string();
+    let case_id = value
+        .get("case_id")
+        .and_then(|v| v.as_str())
+        .unwrap()
+        .to_string();
 
     let document_id = Uuid::new_v4();
     let blob_path = storage_dir.join(format!("{}.bin", document_id));

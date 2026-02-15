@@ -157,6 +157,11 @@ impl AuditClient for InMemoryAuditSink {
     }
 }
 
+/// Returns a 64-character string of zeros, used as the initial hash for audit chains.
+pub fn zero_hash() -> String {
+    "0".repeat(64)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -164,7 +169,14 @@ mod tests {
     #[test]
     fn noop_audit_client_accepts_events() {
         let client = NoopAuditClient;
-        let event = AuditEvent::new("actor", "action", "green", None, None, serde_json::json!({}));
+        let event = AuditEvent::new(
+            "actor",
+            "action",
+            "green",
+            None,
+            None,
+            serde_json::json!({}),
+        );
         assert!(client.record(event).is_ok());
     }
 
@@ -172,7 +184,14 @@ mod tests {
     fn in_memory_sink_implements_audit_client() {
         let sink = InMemoryAuditSink::default();
         let client: &dyn AuditClient = &sink;
-        let event = AuditEvent::new("actor", "action", "green", None, None, serde_json::json!({}));
+        let event = AuditEvent::new(
+            "actor",
+            "action",
+            "green",
+            None,
+            None,
+            serde_json::json!({}),
+        );
         assert!(client.record(event).is_ok());
         assert_eq!(sink.snapshot().len(), 1);
     }
@@ -197,5 +216,12 @@ mod tests {
         assert!(events[0].action.starts_with("auth.denied:"));
         let payload = &events[0].payload;
         assert_eq!(payload["reason"], "insufficient_role");
+    }
+
+    #[test]
+    fn zero_hash_is_64_zeros() {
+        let h = zero_hash();
+        assert_eq!(h.len(), 64);
+        assert!(h.chars().all(|c| c == '0'));
     }
 }
