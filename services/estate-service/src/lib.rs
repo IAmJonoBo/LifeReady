@@ -337,11 +337,144 @@ pub async fn check_db() -> Option<sqlx::PgPool> {
 #[allow(clippy::await_holding_lock)]
 mod tests {
     use super::*;
+    use chrono::Utc;
+    use lifeready_audit::InMemoryAuditSink;
+    use lifeready_auth::{AccessLevel, RequestId};
+    use lifeready_policy::{Role, SensitivityTier};
     use std::future::Future;
     use std::sync::Mutex;
+    use uuid::Uuid;
 
     static ENV_LOCK: Mutex<()> = Mutex::new(());
 
+    fn create_test_state() -> AppState {
+        AppState {
+            audit: InMemoryAuditSink::default(),
+        }
+    }
+
+    fn create_test_ctx(
+        role: Role,
+        allowed_tiers: Vec<SensitivityTier>,
+        scope: AccessLevel,
+    ) -> RequestContext {
+        let scopes = match scope {
+            AccessLevel::LimitedWrite => vec!["write:limited".to_string()],
+            AccessLevel::ReadOnlyAll => vec!["read:all".to_string()],
+            AccessLevel::ReadOnlyPacks => vec!["read:packs".to_string()],
+        };
+
+        RequestContext {
+            request_id: RequestId(Uuid::new_v4()),
+            principal_id: "test-user".to_string(),
+            roles: vec![role],
+            allowed_tiers,
+            scopes,
+            expires_at: Utc::now(),
+            email: None,
+        }
+    }
+
+    fn create_test_payload(tier: Option<SensitivityTier>) -> AssetCreate {
+        AssetCreate {
+            category: "test-category".to_string(),
+            label: "test-label".to_string(),
+            notes: Some("test-notes".to_string()),
+            sensitivity: tier,
+        }
+    }
+    #[tokio::test]
+    async fn create_asset_success() {
+        let state = create_test_state();
+        let ctx = create_test_ctx(
+            Role::Principal,
+            vec![SensitivityTier::Amber],
+            AccessLevel::LimitedWrite,
+        );
+        let request_id = RequestId(Uuid::new_v4());
+        let payload = create_test_payload(Some(SensitivityTier::Amber));
+
+        let result = create_asset(
+            State(state.clone()),
+            ctx,
+            Extension(request_id),
+            Json(payload),
+        )
+        .await;
+
+        match result {
+            Ok((status, Json(response))) => {
+                assert_eq!(status, StatusCode::CREATED);
+                assert_eq!(response.category, "test-category");
+                assert_eq!(response.label, "test-label");
+                assert_eq!(response.sensitivity, SensitivityTier::Amber);
+                assert!(response.notes.is_some());
+
+                // Verify audit
+                let events = state.audit.snapshot();
+                assert_eq!(events.len(), 1);
+                assert_eq!(events[0].action, "estate.asset.created");
+                assert_eq!(events[0].tier, "amber");
+            }
+            Err(_) => panic!("expected success"),
+        }
+    }
+    #[tokio::test]
+    async fn create_asset_fails_wrong_role() {
+        let state = create_test_state();
+        let ctx = create_test_ctx(
+            Role::ExecutorNominee,
+            vec![SensitivityTier::Amber],
+            AccessLevel::LimitedWrite,
+        );
+        let request_id = RequestId(Uuid::new_v4());
+        let payload = create_test_payload(Some(SensitivityTier::Amber));
+
+        let result = create_asset(State(state), ctx, Extension(request_id), Json(payload)).await;
+
+        match result {
+            Ok(_) => panic!("expected failure"),
+            Err(response) => assert_eq!(response.status(), StatusCode::FORBIDDEN),
+        }
+    }
+
+    #[tokio::test]
+    async fn create_asset_fails_wrong_tier() {
+        let state = create_test_state();
+        let ctx = create_test_ctx(
+            Role::Principal,
+            vec![SensitivityTier::Green],
+            AccessLevel::LimitedWrite,
+        );
+        let request_id = RequestId(Uuid::new_v4());
+        let payload = create_test_payload(Some(SensitivityTier::Amber));
+
+        let result = create_asset(State(state), ctx, Extension(request_id), Json(payload)).await;
+
+        match result {
+            Ok(_) => panic!("expected failure"),
+            Err(response) => assert_eq!(response.status(), StatusCode::FORBIDDEN),
+        }
+    }
+
+    #[tokio::test]
+    async fn create_asset_fails_wrong_scope() {
+        let state = create_test_state();
+        let ctx = create_test_ctx(
+            Role::Principal,
+            vec![SensitivityTier::Amber],
+            AccessLevel::ReadOnlyAll,
+        );
+        let request_id = RequestId(Uuid::new_v4());
+        let payload = create_test_payload(Some(SensitivityTier::Amber));
+
+        let result = create_asset(State(state), ctx, Extension(request_id), Json(payload)).await;
+
+        match result {
+            Ok(_) => panic!("expected failure"),
+            Err(response) => assert_eq!(response.status(), StatusCode::FORBIDDEN),
+        }
+    }
     fn with_env(vars: &[(&str, Option<&str>)], f: impl FnOnce()) {
         let _guard = ENV_LOCK.lock().unwrap_or_else(|error| error.into_inner());
         let mut saved = Vec::with_capacity(vars.len());

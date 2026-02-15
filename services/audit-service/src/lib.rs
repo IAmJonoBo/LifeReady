@@ -5,10 +5,12 @@ use axum::{
     routing::{get, post},
 };
 use chrono::Utc;
+use lifeready_audit::zero_hash;
 use lifeready_auth::{
     AuthConfig, AuthLayer, RequestContext, RequestId, conflict, invalid_request,
     request_id_middleware,
 };
+use lifeready_audit::zero_hash;
 use lifeready_policy::{
     Role, SensitivityTier, TierRequirement, require_role, require_scope, require_tier,
 };
@@ -178,10 +180,6 @@ fn canonicalize_value(value: &Value) -> Value {
         Value::Array(items) => Value::Array(items.iter().map(canonicalize_value).collect()),
         _ => value.clone(),
     }
-}
-
-pub fn zero_hash() -> String {
-    "0".repeat(64)
 }
 
 async fn append_audit_event(
