@@ -81,11 +81,13 @@ unauthorised person to:
 
 ### Step 1 — Detect and report internally
 
+<!-- markdownlint-disable MD013 -->
 | Action | Owner | Timeline |
-|--------|-------|----------|
+| :--- | :--- | :--- |
 | Identify potential compromise | Any team member | Immediately |
 | Confirm scope (affected systems, data classes, user count) | Engineering lead | Within 2 hours |
 | Escalate to responsible party (DPO / executive) | Engineering lead | Within 4 hours |
+<!-- markdownlint-enable MD013 -->
 
 ### Step 2 — Create incident record
 
@@ -106,13 +108,15 @@ This creates a case with `case_type = popia_incident` and `status = draft`.
 
 Default evidence slots are created automatically:
 
+<!-- markdownlint-disable MD013 -->
 | Slot | Purpose |
-|------|---------|
+| :--- | :--- |
 | `incident_report` | Formal written report of the breach |
 | `affected_data_summary` | Inventory of compromised personal information categories |
 | `mitigation_evidence` | Proof of remedial steps taken |
 | `regulator_notification_draft` | Draft letter/form for the Information Regulator |
 | `data_subject_notification_draft` | Draft notification to affected individuals |
+<!-- markdownlint-enable MD013 -->
 
 ### Step 3 — Collect evidence
 
@@ -148,22 +152,26 @@ curl -X POST /v1/cases/{case_id}/export \
 
 The export produces a ZIP containing:
 
+<!-- markdownlint-disable MD013 -->
 | File | Content |
-|------|---------|
+| :--- | :--- |
 | `popia_notification_pack.json` | Structured incident data: title, description, affected classes, user count, mitigation, evidence checklist |
 | `popia_instructions.md` | POPIA Section 22 obligations and next steps |
 | `manifest.json` | Case metadata, document checksums, audit head hash |
 | `checksums.txt` | SHA-256 checksums for all bundle files |
 | `audit.jsonl` | Hash-chained audit events (if `read:all` scope) |
 | `documents/` | Attached evidence files |
+<!-- markdownlint-enable MD013 -->
 
 ### Step 6 — Submit to regulator and notify data subjects
 
+<!-- markdownlint-disable MD013 -->
 | Action | Owner | Timeline |
-|--------|-------|----------|
+| :--- | :--- | :--- |
 | Submit notification pack to Information Regulator | DPO | As soon as reasonably possible |
 | Send data subject notifications | DPO + Comms | As soon as reasonably possible |
 | Record submission timestamps | DPO | Same day |
+<!-- markdownlint-enable MD013 -->
 
 ### Step 7 — Close the incident
 
@@ -187,6 +195,7 @@ draft ──► ready ──► exported ──► closed
 ```
 
 Each transition is:
+
 - Validated against the POPIA incident state machine in `allowed_transitions()`
 - Recorded in the `case_transitions` table with actor, timestamp, and reason
 - Immutably logged in the audit trail
@@ -198,14 +207,16 @@ Each transition is:
 The notification to the Information Regulator and data subjects must
 include:
 
+<!-- markdownlint-disable MD013 -->
 | Required element | Source in LifeReady |
-|-----------------|-------------------|
+| :--- | :--- |
 | Description of the compromise | `popia_incident_cases.description` |
 | Category of personal information involved | `popia_incident_cases.affected_data_classes` |
 | Identity and contact details of responsible party | Organisation config (not stored per-incident) |
 | Description of measures taken or proposed | `popia_incident_cases.mitigation_steps` |
 | Recommendations to data subjects | `popia_instructions.md` template |
 | Identity of unauthorised person (if known) | `incident_report` evidence slot |
+<!-- markdownlint-enable MD013 -->
 
 ---
 

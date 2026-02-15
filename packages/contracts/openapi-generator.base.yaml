@@ -1,5 +1,6 @@
 ---
 generatorName: rust-axum
+hideGenerationTimestamp: true
 additionalProperties:
   useSingleRequestParameter: true
   generateAliasAsModel: true
