@@ -1,10 +1,10 @@
 docs:
-  - "docs/**"
+  - any: ["docs/**"]
 contracts:
-  - "packages/contracts/**"
+  - any: ["packages/contracts/**"]
 flutter:
-  - "apps/lifeready_flutter/**"
+  - any: ["apps/lifeready_flutter/**"]
 services:
-  - "services/**"
+  - any: ["services/**"]
 ci:
-  - ".github/workflows/**"
+  - any: [".github/workflows/**"]

@@ -2,7 +2,7 @@
 
 use axum::{
     body::Body,
-    http::{header, Request, StatusCode},
+    http::{Request, StatusCode, header},
 };
 use http_body_util::BodyExt;
 use lifeready_audit::zero_hash;
@@ -19,7 +19,7 @@ fn init_env() {
     static INIT: Once = Once::new();
     INIT.call_once(|| unsafe {
         std::env::set_var("LIFEREADY_ENV", "dev");
-        std::env::set_var("JWT_SECRET", "test-secret-32-chars-minimum!!");
+        std::env::set_var("JWT_SECRET", "test-secret-32-chars-minimum!!!");
     });
 }
 

@@ -1,3 +1,4 @@
+use lifeready_audit::zero_hash;
 use serde::{Deserialize, Serialize};
 use lifeready_audit::zero_hash;
 use serde_json::{Map, Value};
@@ -77,11 +78,12 @@ pub fn verify_audit_chain(input: &Path, expected_head: Option<&str>) -> Result<S
     }
 
     if let Some(expected) = expected_head
-        && expected != last_hash {
-            return Err(format!(
-                "Head hash mismatch: expected {expected}, got {last_hash}"
-            ));
-        }
+        && expected != last_hash
+    {
+        return Err(format!(
+            "Head hash mismatch: expected {expected}, got {last_hash}"
+        ));
+    }
 
     Ok(last_hash)
 }
@@ -349,7 +351,10 @@ mod tests {
     }
 
     fn write_chain(path: &Path, events: &[AuditEvent]) {
-        let lines: Vec<String> = events.iter().map(|e| serde_json::to_string(e).unwrap()).collect();
+        let lines: Vec<String> = events
+            .iter()
+            .map(|e| serde_json::to_string(e).unwrap())
+            .collect();
         fs::write(path, lines.join("\n") + "\n").unwrap();
     }
 
